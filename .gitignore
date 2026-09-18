@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.venv/
+venv/
+
+# Generated output (demo/manual runs, never a source file)
+tree.html
+
+# Zensical docs site build output (deployed via GitHub Actions, not committed)
+site/
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local session state (machine-specific, not project docs)
+.claude/
+CLAUDE.md
+CLAUDE_shared.md
+
+# Local-only planning docs (workflow scratch, never pushed)
+PROPOSAL.md
+BAUPLAN.md
+state/
