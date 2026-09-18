@@ -1,0 +1,18 @@
+[project]
+name = "reliontree"
+version = "0.1.0"
+description = "Standalone RELION job-lineage viewer — no ChimeraX, no server, no GUI toolkit required"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+reliontree = "reliontree.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reliontree"]
