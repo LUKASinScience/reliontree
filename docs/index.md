@@ -104,18 +104,21 @@ For use in scripts or CI:
 | `1` | no RELION project found (no `default_pipeline.star` in the given/current directory or any parent) |
 | `2` | parse or job-lookup error (e.g. `--job` names a job not in the pipeline) |
 
-## Why not Streamlit/Dash/a desktop GUI
+## How reliontree fits alongside other RELION tools
 
-Every existing RELION monitoring tool needs either a running web server
-([Follow_Relion_gracefully](https://github.com/dzyla/Follow_Relion_gracefully),
-[CNIO_Relion_Tools](https://github.com/cryoEM-CNIO/CNIO_Relion_Tools) — both
-need an open port, awkward over SSH-only cluster access) or a desktop GUI
-toolkit ([himena-relion](https://github.com/hanjinliu/himena-relion) — needs
-a display, no headless mode). reliontree's default is a live local view too,
-but a stdlib-only `http.server` bound to `127.0.0.1` that starts itself — no
-manual server to keep alive, no third-party framework. On a login node with
-no browser path at all, `reliontree tree --format html -o tree.html` falls
-back to the old single-file static export instead.
+[Follow_Relion_gracefully](https://github.com/dzyla/Follow_Relion_gracefully)
+and [CNIO_Relion_Tools](https://github.com/cryoEM-CNIO/CNIO_Relion_Tools)
+are Streamlit/Dash apps — a good fit when running a small web server and
+reaching it from a browser is easy.
+[himena-relion](https://github.com/hanjinliu/himena-relion) is a desktop
+GUI, which makes sense when you want a full interactive workstation tool
+with a display attached. reliontree targets a narrower situation those
+aren't aimed at: an SSH-only cluster login node with no display and often
+no spare port to open. Its default view is still live in a browser, just
+via Python's own stdlib `http.server` bound to `127.0.0.1` — nothing to
+install, no port beyond your own machine. When even that's not reachable,
+`reliontree tree --format html -o tree.html` falls back to a single static
+file instead.
 
 ## Origin
 
@@ -125,6 +128,13 @@ Qt/ChimeraX-free core of the
 plugin's RELION History tab — extracted into its own package since it never
 needed ChimeraX to begin with. ChimeraX-InstantMap's homepage:
 [github.com/LUKASinScience/ChimeraX-InstantMap](https://github.com/LUKASinScience/ChimeraX-InstantMap).
+
+## Contributors
+
+- Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
+- Claude Code (Anthropic) — AI pair-programming assistant, wrote and
+  reviewed a substantial part of this codebase alongside Lukas
+- Serhat — joining soon
 
 ## License
 
