@@ -2,7 +2,13 @@
 
 Standalone RELION job-lineage viewer. No ChimeraX, no third-party server
 framework, no GUI toolkit — the default path is a self-starting stdlib-only
-local server. Works on a workstation, an HPC login node (no X11, no root),
+local server. 
+
+![reliontree — live browsing demo](docs/assets/demo.gif)
+
+Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
+
+Works on a workstation, an HPC login node (no X11, no root),
 or a cloud VM, with the same single command.
 
 ```bash
@@ -19,10 +25,6 @@ for the old single-file static export instead.
 
 No `uv`? `pipx run reliontree` works the same way. Want it installed
 persistently in an existing env: `pip install reliontree`.
-
-![reliontree — live browsing demo](docs/assets/demo.gif)
-
-Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
 
 ![reliontree — job tree view](docs/assets/screenshot-tree.png)
 
