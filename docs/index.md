@@ -34,8 +34,8 @@ an in-page directory picker to switch projects. If no project is found at
 all, it still starts and lets you browse to one instead of exiting with an
 error.
 
-![reliontree — job tree view](assets/screenshot-tree.png)
 ![reliontree — live browsing demo](assets/demo.gif)
+![reliontree — job tree view](assets/screenshot-tree.png)
 
 On a machine with no browser available (a cluster login node), use
 `reliontree tree --format html -o tree.html` for the old single-file static
