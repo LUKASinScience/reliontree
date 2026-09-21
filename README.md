@@ -20,9 +20,6 @@ for the old single-file static export instead.
 No `uv`? `pipx run reliontree` works the same way. Want it installed
 persistently in an existing env: `pip install reliontree`.
 
-<!-- TODO(Serhat): screenshots + a short GIF walkthrough of the live view
-     (job cards, click-to-browse sidebar, project picker) go here once
-     you've been added as a contributor — see BAUPLAN.md. -->
 ![reliontree — job tree view](docs/assets/screenshot-tree.png)
 ![reliontree — live browsing demo](docs/assets/demo.gif)
 
@@ -106,7 +103,7 @@ never needed ChimeraX to begin with. Homepage:
 - Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
 - Claude Code (Anthropic) — AI pair-programming assistant, wrote and
   reviewed a substantial part of this codebase alongside Lukas
-- Serhat — joining soon
+- Serhat Dönmez — screenshots and demo GIF for the README/docs
 
 ## License
 
