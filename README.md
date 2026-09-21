@@ -20,8 +20,11 @@ for the old single-file static export instead.
 No `uv`? `pipx run reliontree` works the same way. Want it installed
 persistently in an existing env: `pip install reliontree`.
 
-![reliontree — job tree view](docs/assets/screenshot-tree.png)
 ![reliontree — live browsing demo](docs/assets/demo.gif)
+
+Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
+
+![reliontree — job tree view](docs/assets/screenshot-tree.png)
 
 ## Usage
 
