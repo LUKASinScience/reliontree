@@ -132,7 +132,8 @@ needed ChimeraX to begin with. ChimeraX-InstantMap's homepage:
 - Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
 - Claude Code (Anthropic) — AI pair-programming assistant, wrote and
   reviewed a substantial part of this codebase alongside Lukas
-- Serhat Dönmez — screenshots and demo GIF for the README/docs
+- Serhat Dönmez ([serhatdonmez98-cmd](https://github.com/serhatdonmez98-cmd)) —
+  screenshots and demo GIF for the README/docs
 
 ## License
 
