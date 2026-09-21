@@ -1,7 +1,7 @@
 [project]
 site_url = "https://lukasinscience.github.io/reliontree/"
 site_name = "reliontree"
-site_description = "Standalone RELION job-lineage viewer — no ChimeraX, no server, no GUI toolkit required"
+site_description = "Standalone RELION job-lineage viewer — no ChimeraX, no third-party server framework, no GUI toolkit required"
 site_author = "Lukas W. Bauer"
 
 copyright = "Copyright &copy; 2026 Lukas W. Bauer"
