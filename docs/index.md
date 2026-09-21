@@ -34,8 +34,6 @@ an in-page directory picker to switch projects. If no project is found at
 all, it still starts and lets you browse to one instead of exiting with an
 error.
 
-<!-- TODO(Serhat): screenshots + a short GIF walkthrough (job cards, sidebar,
-     project picker) — see BAUPLAN.md, needs a git contributor invite first. -->
 ![reliontree — job tree view](assets/screenshot-tree.png)
 ![reliontree — live browsing demo](assets/demo.gif)
 
@@ -134,7 +132,7 @@ needed ChimeraX to begin with. ChimeraX-InstantMap's homepage:
 - Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
 - Claude Code (Anthropic) — AI pair-programming assistant, wrote and
   reviewed a substantial part of this codebase alongside Lukas
-- Serhat — joining soon
+- Serhat Dönmez — screenshots and demo GIF for the README/docs
 
 ## License
 
