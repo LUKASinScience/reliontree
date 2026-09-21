@@ -1,7 +1,7 @@
 [project]
 name = "reliontree"
 version = "0.1.0"
-description = "Standalone RELION job-lineage viewer — no ChimeraX, no server, no GUI toolkit required"
+description = "Standalone RELION job-lineage viewer — no ChimeraX, no third-party server framework, no GUI toolkit required"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.9"
