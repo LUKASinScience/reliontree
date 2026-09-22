@@ -5,7 +5,20 @@
 
 proc ModulesHelp { } {
     puts stderr "reliontree — standalone RELION job-lineage viewer."
-    puts stderr "Adds the `reliontree` command to PATH."
+    puts stderr "No ChimeraX, no third-party server framework, no GUI toolkit."
+    puts stderr ""
+    puts stderr "This module only adds the reliontree command to PATH -- every"
+    puts stderr "subcommand and option works exactly as documented at"
+    puts stderr "https://github.com/LUKASinScience/reliontree, nothing cluster-specific."
+    puts stderr ""
+    puts stderr "Usage:"
+    puts stderr "  cd /path/to/your/relion_project"
+    puts stderr "  reliontree                          zero-config: opens the live view"
+    puts stderr "  reliontree tree . --format json      machine-readable job graph"
+    puts stderr "  reliontree table . --format csv      job history as a table"
+    puts stderr "  reliontree watch . --port 8710       live view with explicit options"
+    puts stderr ""
+    puts stderr "See 'reliontree --help' (and 'reliontree <subcommand> --help') once loaded."
 }
 
 module-whatis "Standalone RELION job-lineage viewer (no ChimeraX, no third-party server framework)"
