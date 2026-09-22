@@ -27,23 +27,8 @@ from urllib.parse import parse_qs, urlsplit
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
+from .relion_project import ProjectNotFoundError, find_project
 from .render_html import render_html
-
-
-class ProjectNotFoundError(Exception):
-    pass
-
-
-def find_project(start=None):
-    """Walk upward from `start` (default: cwd) looking for
-    `default_pipeline.star`, the same way `git status` finds its repo."""
-    p = Path(start or ".").resolve()
-    for candidate in (p, *p.parents):
-        if (candidate / "default_pipeline.star").is_file():
-            return candidate
-    raise ProjectNotFoundError(
-        "no RELION project found (no default_pipeline.star in %s or any parent directory)" % p
-    )
 
 
 def _write(text, out_path):
