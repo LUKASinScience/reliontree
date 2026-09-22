@@ -344,7 +344,13 @@ renderJobList("");
 const AUTO_REFRESH_SECONDS = {auto_refresh_seconds};
 if (AUTO_REFRESH_SECONDS > 0) {{
   const toggle = document.getElementById("autoRefreshToggle");
-  setInterval(() => {{ if (toggle.checked) location.reload(); }}, AUTO_REFRESH_SECONDS * 1000);
+  setInterval(() => {{
+    // Skip a reload while the detail drawer is open (Compare, "Why this
+    // job?", or plain job details) -- location.reload() would otherwise
+    // wipe out whatever you're in the middle of comparing/reading.
+    const detailOpen = document.getElementById("detail").classList.contains("open");
+    if (toggle.checked && !detailOpen) location.reload();
+  }}, AUTO_REFRESH_SECONDS * 1000);
 }}
 
 document.querySelectorAll(".job-card").forEach(el => {{
