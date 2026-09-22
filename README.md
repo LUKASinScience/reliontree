@@ -94,6 +94,11 @@ your own machine. When even that's not reachable, `reliontree tree
 --format html -o tree.html` falls back to a single static file instead: `scp`
 it back or open it over a mounted path.
 
+Want to run `reliontree watch` as its own SLURM job instead of inside a GPU
+allocation (it never needs a GPU, and shouldn't tie one up)?
+[`contrib/slurm/`](contrib/slurm/) has a minimal, CPU-only `sbatch` template
+and the SSH-tunnel steps to reach it from your laptop.
+
 ## Origin
 
 The pipeline-parsing and job-tree-diagram logic here started as the
