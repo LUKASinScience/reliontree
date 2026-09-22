@@ -38,10 +38,16 @@ reliontree tree . --format json               # machine-readable, for scripts/ag
 reliontree tree . --job Class3D/job012        # just that job's upstream lineage
 reliontree table . --format csv -o jobs.csv   # job table for a supplement
 reliontree methods .                          # draft methods-paragraph, one line per job
+reliontree diff --job Refine3D/job039 --job Refine3D/job042   # 2+ jobs' changed/varying options
+reliontree why --job Refine3D/job042          # parent, siblings, what changed from the parent
 reliontree tree . --format html -o tree.html  # old single-file static export
 ```
 
-Exit codes for the `tree`/`table`/`methods` subcommands (for scripting):
+In the live view: check two or more jobs in the sidebar to enable "Compare",
+or open a job's Details drawer and click "Why this job?" — both run
+entirely client-side against data already on the page, no server round trip.
+
+Exit codes for the `tree`/`table`/`methods`/`diff`/`why` subcommands (for scripting):
 `0` ok, `1` no RELION project found, `2`
 parse/job-lookup error.
 
@@ -120,6 +126,10 @@ rows = reliontree.history_rows(
     reliontree.ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"],
 )
 csv_text = reliontree.rows_to_csv(rows)
+
+# compare two jobs' options, or ask why a job exists relative to its parent
+diff = reliontree.diff_options(tree["options"]["Refine3D/job039"], tree["options"]["Refine3D/job042"])
+context = reliontree.job_context(tree, "Refine3D/job042")
 ```
 
 `tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,

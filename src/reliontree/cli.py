@@ -12,9 +12,11 @@ browser -- see `reliontree` with no subcommand below).
     reliontree tree /path/to/project --job Class3D/job012 --format json
     reliontree table /path/to/project --format csv -o jobs.csv
     reliontree methods /path/to/project
+    reliontree diff --job Refine3D/job039 --job Refine3D/job042
+    reliontree why --job Refine3D/job042
     reliontree watch /path/to/project            # live-refreshing local view, stdlib http.server only
 
-Exit codes (tree/table/methods subcommands): 0 ok, 1 no RELION project found, 2 parse/job-lookup error.
+Exit codes (tree/table/methods/diff/why subcommands): 0 ok, 1 no RELION project found, 2 parse/job-lookup error.
 """
 
 import argparse
@@ -27,6 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
+from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
 from .relion_project import ProjectNotFoundError, find_project
@@ -82,6 +85,75 @@ def cmd_methods(args):
     _, tree = _build(args)
     jobs = ordered_jobs(tree)
     _write(draft_methods_paragraph(jobs, tree["options"], tree["stats"]), args.out)
+
+
+def cmd_diff(args):
+    """Compare 2+ jobs' recorded `job.star` options: exactly 2 gives a
+    changed/unchanged split, 3+ gives a varying/constant split across all
+    of them (e.g. sibling Refine3D jobs under the same Select job)."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    tree = build_tree(project)
+    jobs = args.job
+    missing = [j for j in jobs if j not in tree["options"]]
+    if missing:
+        raise ValueError("job(s) not found in pipeline: %s" % ", ".join(missing))
+
+    if len(jobs) == 2:
+        result = diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]])
+        if args.format == "json":
+            _write(json.dumps(result, indent=2), args.out)
+            return
+        lines = ["Comparing %s vs %s" % (jobs[0], jobs[1]), "", "Changed:"]
+        for key, (a, b) in sorted(result["changed"].items()):
+            lines.append("  %-30s %s -> %s" % (key, a, b))
+        if not result["changed"]:
+            lines.append("  (none -- identical options)")
+        _write("\n".join(lines), args.out)
+    else:
+        result = diff_many_options({j: tree["options"][j] for j in jobs})
+        if args.format == "json":
+            _write(json.dumps(result, indent=2), args.out)
+            return
+        lines = ["Comparing %d jobs: %s" % (len(jobs), ", ".join(jobs)), "", "Varying:"]
+        for key, values in sorted(result["varying"].items()):
+            lines.append("  %s" % key)
+            for j in jobs:
+                lines.append("    %-30s %s" % (j, values.get(j)))
+        if not result["varying"]:
+            lines.append("  (none -- all identical)")
+        _write("\n".join(lines), args.out)
+
+
+def cmd_why(args):
+    """"Why does this job exist?": its parent(s), sibling jobs sharing a
+    parent, and what changed in its options compared to its parent's."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    tree = build_tree(project)
+    if args.job not in tree["parents"]:
+        raise ValueError("job %r not found in pipeline under %s" % (args.job, project))
+    ctx = job_context(tree, args.job)
+    if args.format == "json":
+        _write(json.dumps(ctx, indent=2), args.out)
+        return
+    lines = [
+        "Job: %s" % args.job,
+        "",
+        "Parent(s): %s" % (", ".join(ctx["parents"]) or "(none)"),
+        "Sibling(s): %s" % (", ".join(ctx["siblings"]) or "(none)"),
+        "",
+    ]
+    if ctx["diff_from_parent"] is not None:
+        lines.append("Changed from parent (%s):" % ctx["diff_parent"])
+        changed = ctx["diff_from_parent"]["changed"]
+        for key, (a, b) in sorted(changed.items()):
+            lines.append("  %-30s %s -> %s" % (key, a, b))
+        if not changed:
+            lines.append("  (none -- identical options)")
+    elif ctx["parents"]:
+        lines.append(
+            "(parent %s is a different job type -- options aren't comparable)" % ctx["diff_parent"]
+        )
+    _write("\n".join(lines), args.out)
 
 
 def _nav_button(label, href, primary=False):
@@ -273,7 +345,7 @@ def _default(project=None):
     cmd_watch(args)
 
 
-_SUBCOMMANDS = {"tree", "table", "methods", "watch"}
+_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "watch"}
 
 
 def main(argv=None):
@@ -321,6 +393,21 @@ def main(argv=None):
     sp = sub.add_parser("methods", help="draft methods-section paragraph")
     common(sp)
     sp.set_defaults(func=cmd_methods)
+
+    sp = sub.add_parser("diff", help="compare 2+ jobs' recorded options (changed/varying vs. unchanged/constant)")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", action="append", required=True,
+                     help="a job to compare, e.g. --job Refine3D/job039 --job Refine3D/job042 (repeat for 3+)")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("why", help="why does this job exist: parent(s), siblings, and what changed from the parent")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", required=True, help="the job to explain, e.g. Refine3D/job042")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_why)
 
     sp = sub.add_parser("watch", help="live-refreshing local view (stdlib http.server, no Flask/Streamlit)")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
