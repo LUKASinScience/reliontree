@@ -99,6 +99,27 @@ allocation (it never needs a GPU, and shouldn't tie one up)?
 [`contrib/slurm/`](contrib/slurm/) has a minimal, CPU-only `sbatch` template
 and the SSH-tunnel steps to reach it from your laptop.
 
+## Using reliontree as a library
+
+Everything the CLI does is also a plain importable function — useful for a
+notebook, a script, or another tool's pipeline:
+
+```python
+import reliontree
+
+project = reliontree.find_project(".")        # or a specific path
+tree = reliontree.build_tree(project)
+html = reliontree.render_html(tree, title=str(project))
+
+rows = reliontree.history_rows(
+    reliontree.ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"],
+)
+csv_text = reliontree.rows_to_csv(rows)
+```
+
+`tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,
+`job_dirs`) — no custom classes to learn.
+
 ## Origin
 
 The pipeline-parsing and job-tree-diagram logic here started as the

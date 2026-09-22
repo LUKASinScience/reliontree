@@ -102,6 +102,27 @@ For use in scripts or CI:
 | `1` | no RELION project found (no `default_pipeline.star` in the given/current directory or any parent) |
 | `2` | parse or job-lookup error (e.g. `--job` names a job not in the pipeline) |
 
+## Using reliontree as a library
+
+Everything the CLI does is also a plain importable function — useful for a
+notebook, a script, or another tool's pipeline:
+
+```python
+import reliontree
+
+project = reliontree.find_project(".")        # or a specific path
+tree = reliontree.build_tree(project)
+html = reliontree.render_html(tree, title=str(project))
+
+rows = reliontree.history_rows(
+    reliontree.ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"],
+)
+csv_text = reliontree.rows_to_csv(rows)
+```
+
+`tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,
+`job_dirs`) — no custom classes to learn.
+
 ## How reliontree fits alongside other RELION tools
 
 [Follow_Relion_gracefully](https://github.com/dzyla/Follow_Relion_gracefully)
