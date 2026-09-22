@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""reliontree — standalone RELION job-lineage viewer. No ChimeraX, no Qt, no
-third-party dependencies (pure stdlib). Usable by a human in a terminal, by a
-script/AI agent (--format json, defined exit codes), or as a zero-config
-"GUI" (no arguments: auto-detects the project in the current directory and
-opens an interactive-free but readable HTML tree in the browser).
+"""reliontree -- standalone RELION job-lineage viewer, no ChimeraX/Qt/third-party dependencies required.
 
-    reliontree                                   # zero-config: detect + open in browser
+Usable by a human in a terminal, by a script/AI agent (--format json,
+defined exit codes), or zero-config (no arguments: auto-detects the
+project in the current directory and opens a live local view in the
+browser -- see `reliontree` with no subcommand below).
+
+    reliontree                                   # zero-config: detect + open the live view
+    reliontree /path/to/project                  # same, pointed at an explicit directory
     reliontree tree /path/to/project -o tree.svg
     reliontree tree /path/to/project --job Class3D/job012 --format json
     reliontree table /path/to/project --format csv -o jobs.csv
     reliontree methods /path/to/project
     reliontree watch /path/to/project            # live-refreshing local view, stdlib http.server only
 
-Exit codes: 0 ok, 1 no RELION project found, 2 parse/job-lookup error.
+Exit codes (tree/table/methods subcommands): 0 ok, 1 no RELION project found, 2 parse/job-lookup error.
 """
 
 import argparse
@@ -286,7 +288,18 @@ def main(argv=None):
         _default(project=argv[0])
         return
 
-    p = argparse.ArgumentParser(prog="reliontree", description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(
+        prog="reliontree",
+        description=__doc__.split("\n\n")[0],
+        epilog=(
+            "examples:\n"
+            "  reliontree                     zero-config: detect + open the live view\n"
+            "  reliontree /path/to/project    same, pointed at an explicit directory\n"
+            "  reliontree tree . --format json\n"
+            "  reliontree watch . --port 8710"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = p.add_subparsers(dest="cmd")
 
     def common(sp):
