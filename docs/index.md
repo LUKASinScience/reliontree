@@ -139,6 +139,16 @@ install, no port beyond your own machine. When even that's not reachable,
 `reliontree tree --format html -o tree.html` falls back to a single static
 file instead.
 
+Want to run `reliontree watch` as its own SLURM job instead of inside a GPU
+allocation (it never needs a GPU, and shouldn't tie one up)? `contrib/slurm/`
+in the repo has a minimal, CPU-only `sbatch` template and the SSH-tunnel
+steps to reach it from your laptop.
+
+Cluster provides software via `module load` instead of `pip install`?
+`contrib/modules/` has an Lmod/Tcl modulefile — once an admin sets it up,
+`module load reliontree` puts the exact same `reliontree` command (all the
+same subcommands and options) on `PATH`.
+
 ## Origin
 
 The pipeline-parsing and job-tree-diagram logic here started as the

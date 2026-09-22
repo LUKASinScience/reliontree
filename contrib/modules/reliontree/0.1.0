@@ -1,0 +1,17 @@
+#%Module1.0
+## Tcl modulefile (classic Environment Modules) — equivalent to 0.1.0.lua
+## for sites running Tcl modules instead of Lmod. Lmod also reads this
+## format, but prefers the .lua file when both exist for the same version.
+
+proc ModulesHelp { } {
+    puts stderr "reliontree — standalone RELION job-lineage viewer."
+    puts stderr "Adds the `reliontree` command to PATH."
+}
+
+module-whatis "Standalone RELION job-lineage viewer (no ChimeraX, no third-party server framework)"
+
+# Edit this to wherever contrib/modules/install.sh installed reliontree's
+# venv on this cluster.
+set install_dir /path/to/shared/apps/reliontree/0.1.0 ;# <-- edit for your site
+
+prepend-path PATH $install_dir/bin

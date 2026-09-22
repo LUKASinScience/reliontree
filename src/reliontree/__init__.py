@@ -18,7 +18,7 @@ Usable as a library, not just the `reliontree` CLI:
     csv_text = reliontree.rows_to_csv(rows)
 """
 
-from .cli import ProjectNotFoundError, find_project
+from .relion_project import ProjectNotFoundError, find_project
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
 from .relion_treebuild import build_tree, ordered_jobs, render_svg

@@ -99,6 +99,11 @@ allocation (it never needs a GPU, and shouldn't tie one up)?
 [`contrib/slurm/`](contrib/slurm/) has a minimal, CPU-only `sbatch` template
 and the SSH-tunnel steps to reach it from your laptop.
 
+Cluster provides software via `module load` instead of `pip install`?
+[`contrib/modules/`](contrib/modules/) has an Lmod/Tcl modulefile — once an
+admin sets it up, `module load reliontree` puts the exact same `reliontree`
+command (all the same subcommands and options) on `PATH`.
+
 ## Using reliontree as a library
 
 Everything the CLI does is also a plain importable function — useful for a
