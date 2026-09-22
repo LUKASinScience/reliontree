@@ -19,6 +19,7 @@ Usable as a library, not just the `reliontree` CLI:
 """
 
 from .relion_project import ProjectNotFoundError, find_project
+from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
@@ -38,4 +39,7 @@ __all__ = [
     "rows_to_csv",
     "rows_to_markdown",
     "draft_methods_paragraph",
+    "diff_options",
+    "diff_many_options",
+    "job_context",
 ]

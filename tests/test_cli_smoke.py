@@ -57,6 +57,70 @@ def _make_project(tmp_path: Path) -> Path:
     return project
 
 
+DIFF_PIPELINE_STAR = """
+data_pipeline_general
+
+data_pipeline_processes
+
+loop_
+_rlnPipeLineProcessName #1
+_rlnPipeLineProcessAlias #2
+_rlnPipeLineProcessTypeLabel #3
+_rlnPipeLineProcessStatusLabel #4
+Import/job001/ None relion.import.movies Scheduled
+Class3D/job002/ None relion.class3d Scheduled
+Class3D/job003/ None relion.class3d Scheduled
+
+data_pipeline_nodes
+
+loop_
+_rlnPipeLineNodeName #1
+_rlnPipeLineNodeTypeLabel #2
+Import/job001/movies.star relion.movies
+
+data_pipeline_input_edges
+
+loop_
+_rlnPipeLineEdgeFromNode #1
+_rlnPipeLineEdgeProcess #2
+Import/job001/movies.star Class3D/job002/
+Import/job001/movies.star Class3D/job003/
+
+data_pipeline_output_edges
+
+loop_
+_rlnPipeLineEdgeProcess #1
+_rlnPipeLineEdgeToNode #2
+Import/job001/ Import/job001/movies.star
+"""
+
+JOB_STAR_TEMPLATE = """
+data_joboptions_values
+
+loop_
+_rlnJobOptionVariable #1
+_rlnJobOptionValue #2
+tau_fudge {tau_fudge}
+sym_name {sym_name}
+"""
+
+
+def _make_diff_project(tmp_path: Path) -> Path:
+    """Two sibling Class3D jobs (same type, same parent) with different
+    job.star options — enough to exercise `diff`/`why` meaningfully."""
+    project = tmp_path / "relion_project"
+    project.mkdir()
+    (project / "default_pipeline.star").write_text(DIFF_PIPELINE_STAR, encoding="utf-8")
+    for job in ("Import/job001", "Class3D/job002", "Class3D/job003"):
+        (project / job).mkdir(parents=True)
+        (project / job / "RELION_JOB_EXIT_SUCCESS").write_text("", encoding="utf-8")
+    (project / "Class3D/job002/job.star").write_text(
+        JOB_STAR_TEMPLATE.format(tau_fudge=4, sym_name="C1"), encoding="utf-8")
+    (project / "Class3D/job003/job.star").write_text(
+        JOB_STAR_TEMPLATE.format(tau_fudge=2, sym_name="C1"), encoding="utf-8")
+    return project
+
+
 def _run(*args):
     return subprocess.run(
         [sys.executable, "-m", "reliontree.cli", *args],
@@ -106,6 +170,29 @@ def test_unknown_job_exits_2(tmp_path):
     result = _run("tree", str(project), "--job", "Refine3D/job999")
     assert result.returncode == 2
     assert "not found" in result.stderr
+
+
+def test_diff_two_jobs(tmp_path):
+    project = _make_diff_project(tmp_path)
+    result = _run("diff", str(project), "--job", "Class3D/job002", "--job", "Class3D/job003",
+                  "--format", "json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["changed"]["tau_fudge"] == ["4", "2"]
+    assert data["unchanged"]["sym_name"] == "C1"
+
+
+def test_why_same_type_parent_diffs(tmp_path):
+    project = _make_diff_project(tmp_path)
+    # Class3D/job003 shares its Import parent with Class3D/job002 (a
+    # different type), so job_context should report no comparable parent —
+    # there's no same-type Class3D parent here to diff against.
+    result = _run("why", str(project), "--job", "Class3D/job003", "--format", "json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["parents"] == ["Import/job001"]
+    assert "Class3D/job002" in data["siblings"]
+    assert data["diff_from_parent"] is None
 
 
 def test_zero_config_no_project_starts_picker(tmp_path):

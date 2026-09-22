@@ -79,6 +79,31 @@ One line per job, assembled from each job's own recorded parameters
 (`job.star`) and outcome (resolution/particle count) — a starting point to
 edit, not a citation-ready paragraph.
 
+### `diff` — compare 2+ jobs' recorded options
+
+```bash
+reliontree diff --job Refine3D/job039 --job Refine3D/job042
+reliontree diff --job Refine3D/job039 --job Refine3D/job040 --job Refine3D/job041 --format json
+```
+
+Exactly 2 `--job` values gives a changed/unchanged split; 3 or more gives a
+varying/constant split across all of them at once — e.g. three Refine3D
+jobs that share a Select job as input, run with different mask diameters.
+
+### `why` — why does this job exist?
+
+```bash
+reliontree why --job Refine3D/job042
+```
+
+Its parent(s), its siblings (other jobs sharing a parent), and — when the
+parent is the same job type (e.g. Refine3D from Refine3D, not Refine3D
+from its Select input) — what changed in its options compared to the
+parent's, since a diff against a differently-typed parent is mostly noise.
+Both `diff` and `why` are also available live in the browser: check 2+
+jobs in the sidebar for "Compare", or open a job's Details drawer for
+"Why this job?" — computed client-side from data already on the page.
+
 ### `watch` — live-refreshing local view, with options
 
 ```bash
@@ -118,6 +143,10 @@ rows = reliontree.history_rows(
     reliontree.ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"],
 )
 csv_text = reliontree.rows_to_csv(rows)
+
+# compare two jobs' options, or ask why a job exists relative to its parent
+diff = reliontree.diff_options(tree["options"]["Refine3D/job039"], tree["options"]["Refine3D/job042"])
+context = reliontree.job_context(tree, "Refine3D/job042")
 ```
 
 `tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,
