@@ -19,15 +19,25 @@ _PAGE = """<!doctype html>
   h1 {{ font-size: 14px; color: #444; margin: 0 0 12px 0; word-break: break-all; }}
   #sidebar {{ width: 240px; flex: none; overflow-y: auto; border-right: 1px solid #ddd;
               background: white; padding: 12px 0; }}
-  #sidebar input {{ width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px; box-sizing: border-box; }}
+  #sidebar input[type=text] {{ width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px; box-sizing: border-box; }}
   .job-item {{ display: flex; align-items: center; justify-content: space-between; gap: 6px;
                padding: 6px 12px; cursor: pointer; font-size: 12px; border-left: 3px solid transparent; }}
   .job-item:hover {{ background: #f0f0f0; }}
   .job-item.selected {{ background: #e8f0fe; font-weight: bold; }}
-  .job-item .job-label {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .job-item .job-label {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
   .job-item .tree-btn {{ flex: none; font-size: 11px; padding: 1px 6px; border: 1px solid #ccc;
                           border-radius: 4px; background: white; cursor: pointer; color: #333; }}
   .job-item .tree-btn:hover {{ background: #e8f0fe; }}
+  .job-item input[type=checkbox] {{ flex: none; margin: 0; }}
+  #compareBar {{ padding: 6px 12px; font-size: 11px; color: #555; display: flex;
+                 align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; }}
+  #compareBar button {{ font-size: 11px; padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px;
+                         background: white; cursor: pointer; }}
+  #compareBar button:disabled {{ color: #bbb; cursor: default; }}
+  .drawer table.diff td {{ border-bottom: 1px solid #f2f2f2; }}
+  .drawer .diff-key {{ font-weight: bold; }}
+  .drawer .why-btn {{ font-size: 12px; padding: 5px 10px; border: 1px solid #ccc; border-radius: 5px;
+                       background: white; cursor: pointer; margin-bottom: 12px; }}
   #main {{ flex: 1; overflow: auto; padding: 24px; }}
   .wrap {{ overflow: auto; border: 1px solid #ddd; background: white; border-radius: 8px; padding: 12px; }}
   .job-card {{ cursor: pointer; }}
@@ -66,6 +76,10 @@ _PAGE = """<!doctype html>
 <body>
 <div id="sidebar">
   <input id="jobFilter" type="text" placeholder="filter jobs...">
+  <div id="compareBar">
+    <span id="compareCount">0 selected</span>
+    <button id="compareBtn" disabled onclick="showCompare()">Compare</button>
+  </div>
   <div id="jobList"></div>
 </div>
 <div id="main">
@@ -143,6 +157,7 @@ function exportJson() {{
 }}
 
 function esc(s) {{
+  if (s === undefined || s === null) return "";
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }}
 
@@ -154,6 +169,107 @@ function closeDrawers() {{
   document.querySelectorAll(".drawer").forEach(el => el.classList.remove("open"));
 }}
 
+const compareSelection = new Set();
+
+function jobType(job) {{
+  return job.split("/")[0];
+}}
+
+function formatDuration(seconds) {{
+  if (!seconds && seconds !== 0) return null;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return (h ? h + "h " : "") + m + "m";
+}}
+
+// Same rules as relion_diff.diff_options/diff_many_options in Python (kept
+// in sync by hand -- small enough that a shared build step isn't worth it).
+function diffOptions(a, b) {{
+  const keys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)])).sort();
+  const changed = {{}}, unchanged = {{}};
+  for (const k of keys) {{
+    const va = a[k], vb = b[k];
+    if (va !== vb) changed[k] = [va, vb]; else unchanged[k] = va;
+  }}
+  return {{changed, unchanged}};
+}}
+
+function diffManyOptions(jobsOptions) {{
+  const jobs = Object.keys(jobsOptions);
+  const keys = Array.from(new Set(jobs.flatMap(j => Object.keys(jobsOptions[j])))).sort();
+  const varying = {{}}, constant = {{}};
+  for (const k of keys) {{
+    const values = {{}};
+    for (const j of jobs) values[j] = jobsOptions[j][k];
+    const distinct = new Set(Object.values(values));
+    if (distinct.size > 1) varying[k] = values; else constant[k] = values[jobs[0]];
+  }}
+  return {{varying, constant}};
+}}
+
+function updateCompareBar() {{
+  document.getElementById("compareCount").textContent = compareSelection.size + " selected";
+  document.getElementById("compareBtn").disabled = compareSelection.size < 2;
+}}
+
+function showCompare() {{
+  const jobs = Array.from(compareSelection);
+  const detail = document.getElementById("detail");
+  let body;
+  if (jobs.length === 2) {{
+    const {{changed, unchanged}} = diffOptions(JOBS[jobs[0]].options, JOBS[jobs[1]].options);
+    let rows = "";
+    for (const k of Object.keys(changed).sort()) {{
+      rows += "<tr><td class='key diff-key'>" + esc(k) + "</td><td>" + esc(changed[k][0]) +
+        "</td><td>" + esc(changed[k][1]) + "</td></tr>";
+    }}
+    body = "<h2>Compare</h2><p class=note>" + esc(jobs[0]) + " vs " + esc(jobs[1]) + "</p>" +
+      "<table class=diff><tr><td class=key>changed</td><td>" + esc(jobs[0]) + "</td><td>" +
+      esc(jobs[1]) + "</td></tr>" + (rows || "<tr><td colspan=3 class=note>(identical options)</td></tr>") +
+      "</table>";
+  }} else {{
+    const jobsOptions = {{}};
+    for (const j of jobs) jobsOptions[j] = JOBS[j].options;
+    const {{varying}} = diffManyOptions(jobsOptions);
+    let rows = "";
+    for (const k of Object.keys(varying).sort()) {{
+      rows += "<tr><td class='key diff-key' colspan=2>" + esc(k) + "</td></tr>";
+      for (const j of jobs) {{
+        rows += "<tr><td class=key>" + esc(j) + "</td><td>" + esc(varying[k][j]) + "</td></tr>";
+      }}
+    }}
+    body = "<h2>Compare " + jobs.length + " jobs</h2><p class=note>" + jobs.map(esc).join(", ") + "</p>" +
+      "<table class=diff>" + (rows || "<tr><td class=note>(all identical)</td></tr>") + "</table>";
+  }}
+  detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" + body;
+  openDrawer("detail");
+}}
+
+function showWhy(job) {{
+  const info = JOBS[job];
+  const siblings = Object.keys(JOBS).filter(other =>
+    other !== job && JOBS[other].parents.some(p => info.parents.includes(p)));
+  const sameTypeParent = info.parents.find(p => jobType(p) === jobType(job));
+
+  let body = "<h2>Why " + esc(job) + "?</h2>";
+  body += "<p class=note>Parent(s): " + (info.parents.map(esc).join(", ") || "(none)") + "</p>";
+  body += "<p class=note>Sibling(s): " + (siblings.map(esc).join(", ") || "(none)") + "</p>";
+  if (sameTypeParent) {{
+    const {{changed}} = diffOptions(JOBS[sameTypeParent].options, info.options);
+    body += "<h3>Changed from parent (" + esc(sameTypeParent) + ")</h3><table class=diff>";
+    for (const k of Object.keys(changed).sort()) {{
+      body += "<tr><td class='key diff-key'>" + esc(k) + "</td><td>" + esc(changed[k][0]) +
+        " &rarr; " + esc(changed[k][1]) + "</td></tr>";
+    }}
+    body += (Object.keys(changed).length ? "" : "<tr><td class=note>(none -- identical options)</td></tr>") + "</table>";
+  }} else if (info.parents.length) {{
+    body += "<p class=note>(parent is a different job type -- options aren't comparable)</p>";
+  }}
+  const detail = document.getElementById("detail");
+  detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" + body;
+  openDrawer("detail");
+}}
+
 function renderJobList(filter) {{
   const list = document.getElementById("jobList");
   list.innerHTML = "";
@@ -163,6 +279,18 @@ function renderJobList(filter) {{
     div.className = "job-item";
     div.dataset.job = job;
     div.style.borderLeftColor = TYPE_COLORS[job] || "#616161";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.title = "Select for Compare";
+    checkbox.checked = compareSelection.has(job);
+    checkbox.onclick = (e) => {{
+      e.stopPropagation();
+      if (checkbox.checked) compareSelection.add(job); else compareSelection.delete(job);
+      updateCompareBar();
+    }};
+    div.appendChild(checkbox);
+
     const label = document.createElement("span");
     label.className = "job-label";
     label.textContent = job + "  [" + JOBS[job].state + "]";
@@ -197,12 +325,16 @@ function selectJob(job) {{
   rows += "<tr><td class=key>state</td><td>" + esc(info.state) + "</td></tr>";
   if (info.resolution_angstrom) rows += "<tr><td class=key>resolution</td><td>" + info.resolution_angstrom.toFixed(1) + " &Aring;</td></tr>";
   if (info.n_particles) rows += "<tr><td class=key>particles</td><td>" + info.n_particles.toLocaleString() + "</td></tr>";
+  const runtime = formatDuration(info.runtime_seconds);
+  if (runtime) rows += "<tr><td class=key>runtime</td><td>" + runtime + "</td></tr>";
   if (info.parents.length) rows += "<tr><td class=key>parents</td><td>" + info.parents.map(esc).join(", ") + "</td></tr>";
   for (const k of Object.keys(info.options).sort()) {{
     rows += "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>";
   }}
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
-    "<h2>" + esc(job) + "</h2><table>" + rows + "</table>";
+    "<h2>" + esc(job) + "</h2>" +
+    "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">Why this job? &rarr;</button>" +
+    "<table>" + rows + "</table>";
   openDrawer("detail");
 }}
 
@@ -275,6 +407,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "state": artifacts.get("state", "unknown"),
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "n_particles": stats.get("n_particles"),
+            "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
         }

@@ -239,14 +239,39 @@ def _latest_model_star(job_dir):
     return best
 
 
+def _runtime_seconds(job_dir):
+    """Best-effort wall-clock runtime: mtime of job.star (job was set up)
+    to mtime of whichever RELION_JOB_EXIT_* sentinel is present (job
+    finished/failed/aborted) — both are files RELION itself writes, no
+    dependency on a scheduler's own accounting. None if the job hasn't
+    finished yet, or job.star is missing."""
+    job_star = job_dir / "job.star"
+    if not job_star.is_file():
+        return None
+    try:
+        start = job_star.stat().st_mtime
+    except OSError:
+        return None
+    for marker, _ in STATE_MARKERS:
+        marker_path = job_dir / marker
+        if marker_path.is_file():
+            try:
+                end = marker_path.stat().st_mtime
+            except OSError:
+                return None
+            return max(0.0, end - start)
+    return None
+
+
 def job_stats(job_dir):
     """Best-effort {'resolution_angstrom': float|None, 'n_particles':
-    int|None} for a job, read from files RELION itself writes: a
-    PostProcess job's `postprocess.star` (`_rlnFinalResolution`, the gold-
-    standard masked-FSC value, preferred when present) and a Class3D/
-    Refine3D job's own `*_model.star` (`_rlnCurrentResolution` as a
-    fallback, plus `_rlnGroupNrParticles` summed for the particle count).
-    Pure — no Qt/ChimeraX dependency."""
+    int|None, 'runtime_seconds': float|None} for a job, read from files
+    RELION itself writes: a PostProcess job's `postprocess.star`
+    (`_rlnFinalResolution`, the gold-standard masked-FSC value, preferred
+    when present) and a Class3D/Refine3D job's own `*_model.star`
+    (`_rlnCurrentResolution` as a fallback, plus `_rlnGroupNrParticles`
+    summed for the particle count); runtime from job.star's mtime to the
+    RELION_JOB_EXIT_* sentinel's mtime. Pure — no Qt/ChimeraX dependency."""
     resolution = None
     n_particles = None
 
@@ -269,7 +294,11 @@ def job_stats(job_dir):
                 resolution = _find_scalar_field(text, "_rlnCurrentResolution")
             n_particles = _sum_loop_column(text, "_rlnGroupNrParticles")
 
-    return {"resolution_angstrom": resolution, "n_particles": n_particles}
+    return {
+        "resolution_angstrom": resolution,
+        "n_particles": n_particles,
+        "runtime_seconds": _runtime_seconds(job_dir),
+    }
 
 
 def parse_job_options(job_dir):
