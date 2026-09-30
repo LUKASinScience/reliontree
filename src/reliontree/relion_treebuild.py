@@ -219,8 +219,10 @@ def render_svg(tree):
                       'fill="white" stroke="#ddd" stroke-width="1.5"/>' % (x, y, CARD_W, h))
         parts.append('<rect x="%.1f" y="%.1f" width="%d" height="6" rx="3" fill="%s"/>' %
                       (x, y, CARD_W, type_color))
-        parts.append('<circle cx="%.1f" cy="%.1f" r="4" fill="%s"/>' %
-                      (x + CARD_W - 12, y + 18, state_color))
+        pulse = ('<animate attributeName="opacity" values="1;0.3;1" dur="1.5s" '
+                 'repeatCount="indefinite"/>') if state == "running" else ""
+        parts.append('<circle cx="%.1f" cy="%.1f" r="4" fill="%s">%s</circle>' %
+                      (x + CARD_W - 12, y + 18, state_color, pulse))
         parts.append('<text x="%.1f" y="%.1f" fill="%s" font-size="9" font-weight="bold">%s</text>' %
                       (x + 8, y + 20, type_color, _esc(job_type(job).upper())))
         parts.append('<text x="%.1f" y="%.1f" fill="#222">%s</text>' %
