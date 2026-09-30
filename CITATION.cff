@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use reliontree in your work, please cite it as below."
+type: software
+title: reliontree
+abstract: >-
+  Standalone RELION job-lineage viewer — no ChimeraX, no third-party server
+  framework, no GUI toolkit required. Renders a RELION project's job
+  pipeline as a text/SVG/HTML tree or table from the command line.
+authors:
+  - family-names: Bauer
+    given-names: Lukas W.
+  - family-names: Dönmez
+    given-names: Serhat
+# Written with Claude (Anthropic) as autopilot -- not listed as a CFF
+# author since the schema's `authors` field is for citable
+# people/entities, not tooling; noted here for provenance.
+license: AGPL-3.0-or-later
+repository-code: "https://github.com/LUKASinScience/reliontree"
+version: 0.1.0
+date-released: "2026-09-23"
