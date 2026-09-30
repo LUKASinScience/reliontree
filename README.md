@@ -1,5 +1,16 @@
 # reliontree
 
+One job, one cheese, one relentless mouse. Welcome to reliontree  — the map of the hunt.
+
+![the mouse's hunting journey across a job tree](docs/assets/mouse-hunt.gif)
+
+## Why "reliontree"
+
+In relion, the mouse cursor hunts down exactly one piece of cheese per
+job, chasing it all the way to the end. reliontree is about the whole
+job tree: the mouse's full hunting journey across every job, in one run.
+
+
 Standalone RELION job-lineage viewer. No ChimeraX, no third-party server
 framework, no GUI toolkit — the default path is a self-starting stdlib-only
 local server. 
@@ -27,6 +38,8 @@ No `uv`? `pipx run reliontree` works the same way. Want it installed
 persistently in an existing env: `pip install reliontree`.
 
 ![reliontree — job tree view](docs/assets/screenshot-tree.png)
+
+
 
 ## Usage
 

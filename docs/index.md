@@ -37,6 +37,14 @@ error.
 ![reliontree — live browsing demo](assets/demo.gif)
 ![reliontree — job tree view](assets/screenshot-tree.png)
 
+## Why "reliontree"
+
+In relion, the mouse cursor hunts down exactly one piece of cheese per
+job, chasing it all the way to the end. reliontree is about the whole job
+tree: the mouse's full hunting journey across every job, in one run.
+
+![the mouse's hunting journey across a job tree](assets/mouse-hunt.gif)
+
 On a machine with no browser available (a cluster login node), use
 `reliontree tree --format html -o tree.html` for the old single-file static
 export instead — no server, just a file to `scp` back or open from a

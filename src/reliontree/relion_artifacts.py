@@ -185,12 +185,13 @@ def _find_scalar_field(text, field_name):
     return float(m.group(1)) if m else None
 
 
-def _sum_loop_column(text, field_name):
-    """Sum a numeric column across every row of the `loop_` table that
-    declares it — used for RELION's per-group `_rlnGroupNrParticles` to get
-    a job's total particle count. Returns None if the column isn't found."""
+def _loop_column_values(text, field_name):
+    """Every numeric value of a `loop_` column across the STAR file (e.g.
+    all `_rlnDefocusU` values, one per micrograph/particle). Returns []
+    if the column isn't found."""
     lines = text.splitlines()
     i, n = 0, len(lines)
+    out = []
     while i < n:
         if lines[i].strip().lower() == "loop_":
             i += 1
@@ -200,7 +201,6 @@ def _sum_loop_column(text, field_name):
                 i += 1
             if field_name in cols:
                 idx = cols.index(field_name)
-                total = 0.0
                 while i < n and lines[i].strip() \
                         and not lines[i].lstrip().startswith("_") \
                         and not lines[i].strip().lower().startswith("data_") \
@@ -208,14 +208,22 @@ def _sum_loop_column(text, field_name):
                     parts = lines[i].split()
                     if len(parts) > idx:
                         try:
-                            total += float(parts[idx])
+                            out.append(float(parts[idx]))
                         except ValueError:
                             pass
                     i += 1
-                return int(total)
+                return out
             continue
         i += 1
-    return None
+    return out
+
+
+def _sum_loop_column(text, field_name):
+    """Sum a numeric column across every row of the `loop_` table that
+    declares it — used for RELION's per-group `_rlnGroupNrParticles` to get
+    a job's total particle count. Returns None if the column isn't found."""
+    values = _loop_column_values(text, field_name)
+    return int(sum(values)) if values else None
 
 
 def _latest_model_star(job_dir):

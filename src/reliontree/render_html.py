@@ -7,6 +7,7 @@ import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_export import history_rows, rows_to_csv
+from .theme import THEME_CSS
 
 _PAGE = """<!doctype html>
 <html>
@@ -14,68 +15,98 @@ _PAGE = """<!doctype html>
 <meta charset="utf-8">
 <title>reliontree — {title}</title>
 <style>
-  * {{ box-sizing: border-box; }}
-  body {{ margin: 0; font-family: sans-serif; background: #fafafa; display: flex; height: 100vh; }}
-  h1 {{ font-size: 14px; color: #444; margin: 0 0 12px 0; word-break: break-all; }}
-  #sidebar {{ width: 240px; flex: none; overflow-y: auto; border-right: 1px solid #ddd;
-              background: white; padding: 12px 0; }}
+{theme_css}
+  body {{ display: flex; height: 100vh; margin: 0; }}
+  h1 {{ font-size: 14px; color: var(--text-muted); margin: 0 0 12px 0; word-break: break-all; }}
+  #sidebar {{ width: 280px; flex: none; overflow-y: auto; border-right: 1px solid var(--border);
+              background: var(--surface); padding: 12px 0; }}
   #sidebar input[type=text] {{ width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px; box-sizing: border-box; }}
-  .job-item {{ display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  .job-item {{ display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
                padding: 6px 12px; cursor: pointer; font-size: 12px; border-left: 3px solid transparent; }}
-  .job-item:hover {{ background: #f0f0f0; }}
-  .job-item.selected {{ background: #e8f0fe; font-weight: bold; }}
-  .job-item .job-label {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-  .job-item .tree-btn {{ flex: none; font-size: 11px; padding: 1px 6px; border: 1px solid #ccc;
-                          border-radius: 4px; background: white; cursor: pointer; color: #333; }}
-  .job-item .tree-btn:hover {{ background: #e8f0fe; }}
+  .job-item:hover {{ background: var(--neutral-bg) !important; }}
+  .job-item.selected {{ background: var(--accent-bg) !important; font-weight: bold; }}
+  .job-item .job-label {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .job-item .job-meta {{ flex: 0 0 100%; display: flex; align-items: center; gap: 6px;
+                          font-size: 11px; color: var(--text-muted); padding-left: 20px; }}
+  .job-item .tree-btn {{ flex: none; font-size: 11px; padding: 1px 6px; border: 1px solid var(--border);
+                          border-radius: 4px; background: var(--surface); cursor: pointer; color: var(--text); }}
+  .job-item .tree-btn:hover {{ background: var(--accent-bg); }}
   .job-item input[type=checkbox] {{ flex: none; margin: 0; }}
-  #compareBar {{ padding: 6px 12px; font-size: 11px; color: #555; display: flex;
-                 align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; }}
-  #compareBar button {{ font-size: 11px; padding: 3px 8px; border: 1px solid #ccc; border-radius: 4px;
-                         background: white; cursor: pointer; }}
-  #compareBar button:disabled {{ color: #bbb; cursor: default; }}
-  .drawer table.diff td {{ border-bottom: 1px solid #f2f2f2; }}
-  .drawer .diff-key {{ font-weight: bold; }}
-  .drawer .why-btn {{ font-size: 12px; padding: 5px 10px; border: 1px solid #ccc; border-radius: 5px;
-                       background: white; cursor: pointer; margin-bottom: 12px; }}
+  .job-item .badge {{ flex: none; }}
+  @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.4; }} }}
+  .badge-running {{ animation: pulse 1.5s ease-in-out infinite; }}
+  #compareBar {{ padding: 6px 12px; font-size: 11px; color: var(--text-muted); display: flex;
+                 flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px;
+                 border-bottom: 1px solid var(--border); }}
+  #compareBar button {{ font-size: 11px; padding: 3px 8px; }}
+  #compareBar button:disabled {{ color: var(--text-muted); cursor: default; opacity: 0.5; }}
+  .drawer table.diff td, .modal-box table.diff td {{ border-bottom: 1px solid var(--border); }}
+  .drawer table.diff td:not(.key) {{ word-break: break-word; }}
+  .drawer table.diff td.diff-key {{ white-space: normal; word-break: break-word; }}
+  .drawer .diff-key, .modal-box .diff-key {{ font-weight: bold; }}
+  .modal-box table.diff th {{ text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); }}
+  .drawer .why-btn {{ font-size: 12px; margin-bottom: 12px; }}
   #main {{ flex: 1; overflow: auto; padding: 24px; }}
-  .wrap {{ overflow: auto; border: 1px solid #ddd; background: white; border-radius: 8px; padding: 12px; }}
+  .wrap {{ overflow: auto; padding: 12px; }}
   .job-card {{ cursor: pointer; }}
   #toolbar {{ margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap; }}
-  #toolbar button {{ font-size: 12px; padding: 5px 10px; border: 1px solid #ccc; border-radius: 5px;
-                      background: white; cursor: pointer; }}
-  #toolbar button:hover {{ background: #f0f0f0; }}
-  #toolbar label {{ font-size: 12px; color: #555; display: flex; align-items: center; gap: 4px; margin-left: 8px; }}
+  #toolbar button {{ font-size: 12px; }}
+  #toolbar label {{ font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-left: 8px; }}
+  #jobTable tbody tr {{ cursor: pointer; }}
+  #jobTable tbody tr:hover {{ background: var(--neutral-bg); }}
 
   /* Both side panels are the same kind of thing: a slide-in drawer fixed to
      the right edge, opened by a toolbar button, one at a time. Neither
      reserves permanent layout width the way the old always-on #browse
      sidebar did. */
   .drawer {{ position: fixed; top: 0; right: 0; height: 100vh; width: 320px;
-             background: white; border-left: 1px solid #ddd; box-shadow: -4px 0 12px rgba(0,0,0,0.08);
-             padding: 16px; font-size: 13px; overflow-y: auto;
+             background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow);
+             padding: 16px; font-size: 13px; overflow-y: auto; overflow-x: hidden;
              transform: translateX(100%); transition: transform 0.15s ease; z-index: 20; }}
   .drawer.open {{ transform: translateX(0); }}
-  .drawer h2, .drawer h3 {{ margin: 0 0 12px 0; font-size: 15px; }}
-  .drawer .close-btn {{ float: right; border: none; background: none; font-size: 16px;
-                         cursor: pointer; color: #888; line-height: 1; }}
-  .drawer .close-btn:hover {{ color: #222; }}
-  .drawer table {{ border-collapse: collapse; width: 100%; }}
-  .drawer td {{ padding: 3px 8px 3px 0; vertical-align: top; font-size: 12px; }}
-  .drawer td.key {{ color: #666; white-space: nowrap; }}
-  .drawer .path {{ word-break: break-all; color: #444; margin-bottom: 10px; font-size: 12px; }}
-  .drawer .note {{ color: #888; font-style: italic; font-size: 12px; }}
+  .drawer h2, .drawer h3, .modal-box h2, .modal-box h3 {{ margin: 0 0 12px 0; font-size: 15px; }}
+  .drawer .close-btn, .modal-box .close-btn {{ float: right; border: none; background: none; font-size: 16px;
+                         cursor: pointer; color: var(--text-muted); line-height: 1; }}
+  .drawer .close-btn:hover, .modal-box .close-btn:hover {{ color: var(--text); }}
+  .drawer table {{ border-collapse: collapse; width: 100%; table-layout: fixed; }}
+  .modal-box table {{ border-collapse: collapse; width: 100%; }}
+  .drawer td, .modal-box td {{ padding: 3px 8px 3px 0; vertical-align: top; font-size: 12px; border-bottom: none; }}
+  .drawer td.key {{ color: var(--text-muted); white-space: nowrap; }}
+  .drawer .path {{ word-break: break-all; color: var(--text); margin-bottom: 10px; font-size: 12px; }}
+  .drawer .note, .modal-box .note {{ color: var(--text-muted); font-style: italic; font-size: 12px; }}
   .drawer button.nav {{ display: block; width: 100%; text-align: left; margin-bottom: 4px;
-                         padding: 6px 8px; border: 1px solid #eee; border-radius: 5px;
-                         background: white; cursor: pointer; font-size: 12px; color: #1565c0; }}
-  .drawer button.nav:hover {{ background: #f0f6ff; }}
-  .drawer button.nav.open-project {{ color: #fff; background: #1565c0; border-color: #1565c0; font-weight: bold; }}
-  .drawer button.nav.open-project:hover {{ background: #0d47a1; }}
+                         padding: 6px 8px; font-size: 12px; color: var(--accent); }}
+  .drawer button.nav:hover {{ background: var(--accent-bg); }}
+  .drawer button.nav.open-project {{ color: var(--accent-text); background: var(--accent); border-color: var(--accent); font-weight: bold; }}
+  .drawer button.nav.open-project:hover {{ filter: brightness(0.9); }}
+
+  /* Compare needs real width for N side-by-side values -- the 320px
+     side drawer that works for a single job's key/value list was always
+     too cramped for this, hence the separate centered modal. */
+  .modal-overlay {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+                     z-index: 30; align-items: center; justify-content: center; }}
+  .modal-overlay.open {{ display: flex; }}
+  .modal-box {{ position: relative; background: var(--surface); border-radius: var(--radius);
+                box-shadow: var(--shadow); padding: 24px; width: min(900px, 92vw);
+                max-height: 85vh; overflow-y: auto; overflow-x: auto; }}
+  .modal-box table.diff {{ table-layout: auto; }}
+  .modal-box td.diff-key {{ padding-top: 10px; }}
 </style>
 </head>
 <body>
 <div id="sidebar">
   <input id="jobFilter" type="text" placeholder="filter jobs...">
+  <div id="filterRow" style="display:flex; gap:6px; margin:0 12px 8px;">
+    <select id="typeFilter" style="flex:1; min-width:0;"><option value="">all types</option></select>
+    <select id="stateFilter" style="flex:1; min-width:0;">
+      <option value="">all states</option>
+      <option value="succeeded">succeeded</option>
+      <option value="failed">failed</option>
+      <option value="running">running</option>
+      <option value="aborted">aborted</option>
+      <option value="unknown">unknown</option>
+    </select>
+  </div>
   <div id="compareBar">
     <span id="compareCount">0 selected</span>
     <button id="compareBtn" disabled onclick="showCompare()">Compare</button>
@@ -85,6 +116,7 @@ _PAGE = """<!doctype html>
 <div id="main">
 <h1>{title}</h1>
 <div id="toolbar">
+  <button id="viewToggle" onclick="toggleView()">&#9638; Table view</button>
   <button onclick="exportSvg()">Export SVG</button>
   <button onclick="exportPng()">Export PNG</button>
   <button onclick="exportCsv()">Export CSV</button>
@@ -94,11 +126,22 @@ _PAGE = """<!doctype html>
   <button onclick="openDrawer('browse')" style="margin-left:auto">&#128194; Browse project</button>
 </div>
 {scope_banner}
-<div class="wrap">
+<div class="wrap" id="treeView">
 {svg}
+</div>
+<div class="wrap" id="tableView" style="display:none">
+  <table id="jobTable"><thead><tr>
+    <th>Job</th><th>Type</th><th>State</th><th>Parent(s)</th><th>Resolution</th><th>Particles</th>
+  </tr></thead><tbody></tbody></table>
 </div>
 </div>
 <div id="detail" class="drawer"></div>
+<div id="compareModal" class="modal-overlay" onclick="if (event.target === this) closeCompareModal()">
+  <div class="modal-box">
+    <button class="close-btn" onclick="closeCompareModal()">&times;</button>
+    <div id="compareModalBody"></div>
+  </div>
+</div>
 {browse_panel}
 <script>
 const JOBS = {jobs_json};
@@ -213,36 +256,29 @@ function updateCompareBar() {{
 }}
 
 function showCompare() {{
+  // A real side-by-side table (one column per job) in the wide modal --
+  // the narrow 320px side drawer never had room for N value columns,
+  // which is what forced scrolling either direction.
   const jobs = Array.from(compareSelection);
-  const detail = document.getElementById("detail");
-  let body;
-  if (jobs.length === 2) {{
-    const {{changed, unchanged}} = diffOptions(JOBS[jobs[0]].options, JOBS[jobs[1]].options);
-    let rows = "";
-    for (const k of Object.keys(changed).sort()) {{
-      rows += "<tr><td class='key diff-key'>" + esc(k) + "</td><td>" + esc(changed[k][0]) +
-        "</td><td>" + esc(changed[k][1]) + "</td></tr>";
-    }}
-    body = "<h2>Compare</h2><p class=note>" + esc(jobs[0]) + " vs " + esc(jobs[1]) + "</p>" +
-      "<table class=diff><tr><td class=key>changed</td><td>" + esc(jobs[0]) + "</td><td>" +
-      esc(jobs[1]) + "</td></tr>" + (rows || "<tr><td colspan=3 class=note>(identical options)</td></tr>") +
-      "</table>";
-  }} else {{
-    const jobsOptions = {{}};
-    for (const j of jobs) jobsOptions[j] = JOBS[j].options;
-    const {{varying}} = diffManyOptions(jobsOptions);
-    let rows = "";
-    for (const k of Object.keys(varying).sort()) {{
-      rows += "<tr><td class='key diff-key' colspan=2>" + esc(k) + "</td></tr>";
-      for (const j of jobs) {{
-        rows += "<tr><td class=key>" + esc(j) + "</td><td>" + esc(varying[k][j]) + "</td></tr>";
-      }}
-    }}
-    body = "<h2>Compare " + jobs.length + " jobs</h2><p class=note>" + jobs.map(esc).join(", ") + "</p>" +
-      "<table class=diff>" + (rows || "<tr><td class=note>(all identical)</td></tr>") + "</table>";
+  const jobsOptions = {{}};
+  for (const j of jobs) jobsOptions[j] = JOBS[j].options;
+  const {{varying}} = diffManyOptions(jobsOptions);
+  let rows = "";
+  for (const k of Object.keys(varying).sort()) {{
+    rows += "<tr><td class='key diff-key'>" + esc(k) + "</td>" +
+      jobs.map(j => "<td>" + esc(varying[k][j]) + "</td>").join("") + "</tr>";
   }}
-  detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" + body;
-  openDrawer("detail");
+  const header = "<tr><th>Parameter</th>" + jobs.map(j => "<th>" + esc(j) + "</th>").join("") + "</tr>";
+  const body = "<h2>Compare " + jobs.length + " jobs</h2>" +
+    "<table class=diff><thead>" + header + "</thead><tbody>" +
+    (rows || "<tr><td class=note colspan=" + (jobs.length + 1) + ">(all identical)</td></tr>") +
+    "</tbody></table>";
+  document.getElementById("compareModalBody").innerHTML = body;
+  document.getElementById("compareModal").classList.add("open");
+}}
+
+function closeCompareModal() {{
+  document.getElementById("compareModal").classList.remove("open");
 }}
 
 function showWhy(job) {{
@@ -251,12 +287,13 @@ function showWhy(job) {{
     other !== job && JOBS[other].parents.some(p => info.parents.includes(p)));
   const sameTypeParent = info.parents.find(p => jobType(p) === jobType(job));
 
-  let body = "<h2>Why " + esc(job) + "?</h2>";
+  let body = "<h2>" + esc(job) + " vs. its parent job</h2>";
+  body += "<p class=note>Where this job comes from, and (if its parent is the same job type) exactly which parameters you changed to get here.</p>";
   body += "<p class=note>Parent(s): " + (info.parents.map(esc).join(", ") || "(none)") + "</p>";
-  body += "<p class=note>Sibling(s): " + (siblings.map(esc).join(", ") || "(none)") + "</p>";
+  body += "<p class=note>Sibling(s) &mdash; other jobs from the same parent: " + (siblings.map(esc).join(", ") || "(none)") + "</p>";
   if (sameTypeParent) {{
     const {{changed}} = diffOptions(JOBS[sameTypeParent].options, info.options);
-    body += "<h3>Changed from parent (" + esc(sameTypeParent) + ")</h3><table class=diff>";
+    body += "<h3>Parameters changed from " + esc(sameTypeParent) + "</h3><table class=diff>";
     for (const k of Object.keys(changed).sort()) {{
       body += "<tr><td class='key diff-key'>" + esc(k) + "</td><td>" + esc(changed[k][0]) +
         " &rarr; " + esc(changed[k][1]) + "</td></tr>";
@@ -270,15 +307,51 @@ function showWhy(job) {{
   openDrawer("detail");
 }}
 
+function toggleView() {{
+  const showingTable = document.getElementById("tableView").style.display !== "none";
+  document.getElementById("treeView").style.display = showingTable ? "" : "none";
+  document.getElementById("tableView").style.display = showingTable ? "none" : "";
+  document.getElementById("viewToggle").textContent = showingTable ? "Table view" : "Tree view";
+  if (!showingTable) renderTableView();
+  // Auto-refresh does a real location.reload() (see below), which always
+  // comes back on tree view -- same "my choice keeps resetting" bug as
+  // the sidebar filters, fixed the same way: persist across the reload.
+  try {{ sessionStorage.setItem("reliontree.view", showingTable ? "tree" : "table"); }} catch (e) {{}}
+}}
+
+function renderTableView() {{
+  const body = document.querySelector("#jobTable tbody");
+  body.innerHTML = "";
+  for (const job of Object.keys(JOBS)) {{
+    const info = JOBS[job];
+    const tr = document.createElement("tr");
+    tr.onclick = () => {{ toggleView(); selectJob(job); }};
+    tr.innerHTML = "<td>" + esc(job) + "</td><td>" + esc(jobType(job)) + "</td>" +
+      "<td><span class='badge badge-" +
+      ({{succeeded: "good", failed: "bad", running: "warn", aborted: "warn"}}[info.state] || "neutral") +
+      "'>" + esc(info.state) + "</span></td>" +
+      "<td>" + esc(info.parents.join(", ")) + "</td>" +
+      "<td>" + (info.resolution_angstrom ? info.resolution_angstrom.toFixed(1) + " Å" : "") + "</td>" +
+      "<td>" + (info.n_particles ? info.n_particles.toLocaleString() : "") + "</td>";
+    body.appendChild(tr);
+  }}
+}}
+
 function renderJobList(filter) {{
   const list = document.getElementById("jobList");
+  const typeFilter = document.getElementById("typeFilter").value;
+  const stateFilter = document.getElementById("stateFilter").value;
   list.innerHTML = "";
   for (const job of Object.keys(JOBS)) {{
     if (filter && job.toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
+    if (typeFilter && jobType(job) !== typeFilter) continue;
+    if (stateFilter && JOBS[job].state !== stateFilter) continue;
     const div = document.createElement("div");
     div.className = "job-item";
     div.dataset.job = job;
-    div.style.borderLeftColor = TYPE_COLORS[job] || "#616161";
+    const jobColor = TYPE_COLORS[job] || "#616161";
+    div.style.borderLeftColor = jobColor;
+    div.style.background = jobColor + "48";
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -291,9 +364,10 @@ function renderJobList(filter) {{
     }};
     div.appendChild(checkbox);
 
+    const info = JOBS[job];
     const label = document.createElement("span");
     label.className = "job-label";
-    label.textContent = job + "  [" + JOBS[job].state + "]";
+    label.textContent = job;
     div.appendChild(label);
     div.onclick = () => selectJob(job);
     if (INTERACTIVE) {{
@@ -308,6 +382,20 @@ function renderJobList(filter) {{
       }};
       div.appendChild(btn);
     }}
+
+    const meta = document.createElement("span");
+    meta.className = "job-meta";
+    const stateBadge = document.createElement("span");
+    const stateLevel = {{succeeded: "good", failed: "bad", running: "warn", aborted: "warn"}}[info.state] || "neutral";
+    stateBadge.className = "badge badge-" + stateLevel + (info.state === "running" ? " badge-running" : "");
+    stateBadge.textContent = info.state;
+    meta.appendChild(stateBadge);
+    let extra = "";
+    if (info.resolution_angstrom) extra += info.resolution_angstrom.toFixed(1) + "Å";
+    if (info.n_particles) extra += (extra ? "  " : "") + info.n_particles.toLocaleString();
+    if (extra) meta.appendChild(document.createTextNode(extra));
+    div.appendChild(meta);
+
     list.appendChild(div);
   }}
 }}
@@ -333,13 +421,55 @@ function selectJob(job) {{
   }}
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
     "<h2>" + esc(job) + "</h2>" +
-    "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">Why this job? &rarr;</button>" +
+    "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">What changed vs. parent job? &rarr;</button>" +
     "<table>" + rows + "</table>";
   openDrawer("detail");
 }}
 
-document.getElementById("jobFilter").addEventListener("input", e => renderJobList(e.target.value));
-renderJobList("");
+const typeFilterEl = document.getElementById("typeFilter");
+for (const t of Array.from(new Set(Object.keys(JOBS).map(jobType))).sort()) {{
+  const opt = document.createElement("option");
+  opt.value = t; opt.textContent = t;
+  typeFilterEl.appendChild(opt);
+}}
+
+// Auto-refresh reloads the whole page (simplest way to pick up new jobs
+// on both a static file:// export and this server, per the docstring
+// above) -- that would otherwise silently reset any filter/scroll the
+// user had set, which reads as "my selection keeps jumping back". Persist
+// across reloads in sessionStorage (survives the reload, not a new tab).
+const jobFilterEl = document.getElementById("jobFilter");
+const stateFilterEl = document.getElementById("stateFilter");
+try {{
+  jobFilterEl.value = sessionStorage.getItem("reliontree.jobFilter") || "";
+  typeFilterEl.value = sessionStorage.getItem("reliontree.typeFilter") || "";
+  stateFilterEl.value = sessionStorage.getItem("reliontree.stateFilter") || "";
+}} catch (e) {{}}
+
+function onFilterChange() {{
+  try {{
+    sessionStorage.setItem("reliontree.jobFilter", jobFilterEl.value);
+    sessionStorage.setItem("reliontree.typeFilter", typeFilterEl.value);
+    sessionStorage.setItem("reliontree.stateFilter", stateFilterEl.value);
+  }} catch (e) {{}}
+  renderJobList(jobFilterEl.value);
+}}
+jobFilterEl.addEventListener("input", onFilterChange);
+typeFilterEl.addEventListener("change", onFilterChange);
+stateFilterEl.addEventListener("change", onFilterChange);
+renderJobList(jobFilterEl.value);
+
+try {{
+  if (sessionStorage.getItem("reliontree.view") === "table") toggleView();
+}} catch (e) {{}}
+
+try {{
+  const savedScroll = sessionStorage.getItem("reliontree.sidebarScroll");
+  if (savedScroll) document.getElementById("sidebar").scrollTop = parseInt(savedScroll, 10);
+  document.getElementById("sidebar").addEventListener("scroll", e => {{
+    try {{ sessionStorage.setItem("reliontree.sidebarScroll", e.target.scrollTop); }} catch (err) {{}}
+  }});
+}} catch (e) {{}}
 
 const AUTO_REFRESH_SECONDS = {auto_refresh_seconds};
 if (AUTO_REFRESH_SECONDS > 0) {{
@@ -399,7 +529,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         auto_refresh_toggle = ""
     if selected_job:
         scope_banner = (
-            '<p style="font-size:12px;color:#555;margin:0 0 12px 0;">'
+            '<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px 0;">'
             'Showing upstream lineage of <b>%s</b> — <a href="/?job=">show full tree</a></p>' %
             html.escape(selected_job)
         )
@@ -423,7 +553,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         for job in ordered_jobs(tree)
     }
     return _PAGE.format(
-        title=title, svg=render_svg(tree),
+        title=title, theme_css=THEME_CSS, svg=render_svg(tree),
         jobs_json=json.dumps(jobs), csv_json=json.dumps(rows_to_csv(rows)),
         browse_panel=browse_html if browse_html is not None else _NO_BROWSE_PANEL,
         auto_refresh_toggle=auto_refresh_toggle,
