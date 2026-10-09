@@ -365,7 +365,7 @@ def _default(project=None):
     cmd_watch(args)
 
 
-_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "watch"}
+_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "overlap", "watch"}
 
 
 def main(argv=None):
