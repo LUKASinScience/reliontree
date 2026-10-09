@@ -40,6 +40,23 @@ def class_history(job_dir):
     return out
 
 
+def class_selection(job_dir, n_classes):
+    """Per-class keep flags of a "Select classes" job, positional in the
+    order of the input classification's classes (`backup_selection.star`,
+    RELION records no filenames there). None unless the file exists and its
+    length matches `n_classes` -- a particle-subset Select has no such file
+    or a mismatched one."""
+    try:
+        from .relion_artifacts import _parse_backup_selection_flags
+    except ImportError:
+        from relion_artifacts import _parse_backup_selection_flags
+    try:
+        flags = _parse_backup_selection_flags((job_dir / "backup_selection.star").read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return None
+    return flags if len(flags) == n_classes else None
+
+
 def class_iter_thumbs(job_dir, iteration, size=72):
     """[data-URI, ...] one class-average thumbnail per class at the given
     iteration (3D: run_itNNN_classMMM.mrc volumes' middle slice; 2D: the
