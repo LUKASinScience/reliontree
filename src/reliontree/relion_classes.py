@@ -40,6 +40,32 @@ def class_history(job_dir):
     return out
 
 
+def class_iter_thumbs(job_dir, iteration, size=72):
+    """[data-URI, ...] one class-average thumbnail per class at the given
+    iteration (3D: run_itNNN_classMMM.mrc volumes' middle slice; 2D: the
+    slices of run_itNNN_classes.mrcs). [] if that iteration has no maps."""
+    try:
+        from .relion_mrc_thumb import mrc_slice_thumbnail
+    except ImportError:
+        from relion_mrc_thumb import mrc_slice_thumbnail
+    stack = job_dir / ("run_it%03d_classes.mrcs" % iteration)
+    if stack.is_file():
+        out, z = [], 0
+        while True:
+            uri = mrc_slice_thumbnail(stack, size=size, z=z)
+            if uri is None:
+                return out
+            out.append(uri)
+            z += 1
+    out = []
+    for n in range(1, 64):
+        path = job_dir / ("run_it%03d_class%03d.mrc" % (iteration, n))
+        if not path.is_file():
+            break
+        out.append(mrc_slice_thumbnail(path, size=size))
+    return out
+
+
 def _particle_classes(data_star):
     """{rlnImageName: rlnClassNumber} streamed from a data.star's particle loop."""
     classes = {}

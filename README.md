@@ -53,6 +53,7 @@ reliontree table . --format csv -o jobs.csv   # job table for a supplement
 reliontree methods .                          # draft methods-paragraph, one line per job
 reliontree diff --job Refine3D/job039 --job Refine3D/job042   # 2+ jobs' changed/varying options
 reliontree why --job Refine3D/job042          # parent, siblings, what changed from the parent
+reliontree overlap Class3D/job008 Class3D/job009   # particle overlap matrix between two classifications
 reliontree tree . --format html -o tree.html  # old single-file static export
 ```
 
