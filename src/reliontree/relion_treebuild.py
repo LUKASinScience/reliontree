@@ -301,8 +301,9 @@ def render_svg(tree):
         parts.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#eee"/>' %
                       (x, btn_y, x + CARD_W, btn_y))
         parts.append('<text x="%.1f" y="%.1f" fill="%s" font-weight="bold" '
-                      'text-anchor="middle">Details &#8250;</text>' %
-                      (x + CARD_W / 2, btn_y + 14, type_color))
+                      'text-anchor="middle">%s &#8250;</text>' %
+                      (x + CARD_W / 2, btn_y + 14, type_color,
+                       "Classes &amp; details" if lay["conv"] else "Details"))
         parts.append('</g>')
 
     parts.append("</svg>")
