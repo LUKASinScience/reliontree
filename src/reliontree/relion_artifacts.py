@@ -76,6 +76,21 @@ def list_class_maps(job_dir):
     return [by_class[c][1] for c in sorted(by_class)]
 
 
+def list_class_stack(job_dir):
+    """A Class2D job's latest per-iteration class-average stack
+    (`run_itNNN_classes.mrcs`, one Z-slice per class), or None."""
+    best, best_it = None, -1
+    try:
+        names = [f.name for f in job_dir.iterdir() if f.is_file()]
+    except OSError:
+        return None
+    for name in names:
+        m = re.fullmatch(r"run_it(\d+)_classes\.mrcs", name)
+        if m and int(m.group(1)) > best_it:
+            best_it, best = int(m.group(1)), job_dir / name
+    return best
+
+
 _MAX_SCAN_BYTES = 2_000_000  # option/selection files are tiny; skip large
                               # per-particle data tables (e.g. particles.star)
 
@@ -181,7 +196,7 @@ def _find_scalar_field(text, field_name):
     block's `_rlnCurrentResolution   22.996479` line. Field names are
     unique enough within a RELION model/postprocess star file that a direct
     regex search is reliable without a full STAR parser."""
-    m = re.search(r"^\s*" + re.escape(field_name) + r"\s+([\-0-9.eE]+)", text, re.MULTILINE)
+    m = re.search(r"^\s*" + re.escape(field_name) + r"\s+([\-+0-9.eE]+)", text, re.MULTILINE)
     return float(m.group(1)) if m else None
 
 

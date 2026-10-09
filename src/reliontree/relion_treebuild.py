@@ -4,24 +4,30 @@ behind both `relion_cli.py` (a plain terminal) and `cmd.py` (the ChimeraX
 command line). Pure stdlib only."""
 
 import re
+import struct
 from pathlib import Path
 
 try:
     from .relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
-    from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
+    from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
+    from .relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 except ImportError:
     from relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
-    from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
+    from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
+    from relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 
 CARD_W = 200
 HEADER_H = 40          # colored bar + type label + job id line
 FOOTER_LINE_H = 14     # each of the state / stats text lines below the grid
 DETAILS_BTN_H = 20     # visible "Details" button strip at the bottom of every card
 PADDING_BOTTOM = 6
+CONV_H = 36            # convergence sparkline strip on Class2D/Class3D cards
+TINY_CLASS_SHARE = TINY_SHARE      # a class below this share is dimmed: almost certainly an empty/junk class
+CONV_SETTLED = SETTLED_CHANGES     # dashed "settled" level
 SINGLE_THUMB_SIZE = 120
 GRID_THUMB_SIZE = 56
 GRID_COLS = 3
@@ -53,11 +59,24 @@ def _class_number(path):
     return int(m.group(1)) if m else None
 
 
+def _stack_slices(path):
+    """Range of Z-slices (= classes) in an MRC stack, from its header."""
+    try:
+        with open(path, "rb") as f:
+            return range(struct.unpack("<3i", f.read(12))[2])
+    except (OSError, struct.error):
+        return range(0)
+
+
 def _job_maps(job_dir, artifacts):
     """[(class_number_or_None, path), ...] for everything a card should show
     a thumbnail for: every per-class volume when a job has more than one
     (Class2D/Class3D-style jobs), else its single most relevant map
     (postprocessed > latest class/refine map > mask)."""
+    stack = list_class_stack(job_dir)
+    if stack is not None:
+        n = max(1, len(_stack_slices(stack)))
+        return [(i + 1, (stack, i)) for i in range(n)]
     classes = list_class_maps(job_dir)
     if len(classes) > 1:
         return [(_class_number(p), p) for p in classes]
@@ -75,7 +94,10 @@ def _job_thumbnails(job_dir, artifacts):
     size = GRID_THUMB_SIZE if len(maps) > 1 else SINGLE_THUMB_SIZE
     out = []
     for num, path in maps:
-        uri = mrc_slice_thumbnail(path, size=size)
+        z = None
+        if isinstance(path, tuple):
+            path, z = path
+        uri = mrc_slice_thumbnail(path, size=size, z=z)
         if uri:
             out.append((num, uri))
     return out
@@ -99,18 +121,39 @@ def build_tree(project_dir, selected=None, max_hops=None):
     lyrs = pipeline_layers(None, parents)  # `selected` arg is unused by layers()
 
     jobs = [j for layer in lyrs for j in layer]
-    artifacts, stats, options, job_dirs = {}, {}, {}, {}
+    artifacts, stats, options, job_dirs, classes = {}, {}, {}, {}, {}
     for job in jobs:
         job_dir = project_dir / job
         job_dirs[job] = job_dir
         artifacts[job] = scan_job_artifacts(job_dir)
         stats[job] = job_stats(job_dir)
         options[job] = parse_job_options(job_dir)
+        classes[job] = class_history(job_dir) if job_type(job) in ("Class2D", "Class3D") else []
+
+    # Select-classes jobs: which of the parent classification's classes were kept
+    selection = {}
+    for job in jobs:
+        if job_type(job) != "Select":
+            continue
+        for parent in sorted(parents.get(job, [])):
+            hist = classes.get(parent)
+            flags = class_selection(job_dirs[job], len(hist[-1]["shares"])) if hist else None
+            if flags:
+                selection[job] = {"parent": parent, "flags": flags}
+                break
+
+    # which classes of a classification were kept by a Select job: {class job: {class number: [select jobs]}}
+    chosen = {}
+    for job, sel in selection.items():
+        for i, kept in enumerate(sel["flags"]):
+            if kept:
+                chosen.setdefault(sel["parent"], {}).setdefault(i + 1, []).append(job)
 
     return {
+        "selection": selection, "chosen": chosen,
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
-        "job_dirs": job_dirs,
+        "job_dirs": job_dirs, "classes": classes,
     }
 
 
@@ -120,6 +163,30 @@ def ordered_jobs(tree):
 
 def _esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _convergence(tree, job):
+    """[(iter, fraction switching class)] without the meaningless it0 row;
+    [] when the job has fewer than 2 points to draw."""
+    pts = [(h["iter"], h["changes_classes"]) for h in tree.get("classes", {}).get(job, [])
+           if h["changes_classes"] is not None and h["iter"] > 0]
+    return pts if len(pts) > 1 else []
+
+
+def _conv_svg(x, y, w, h, pts):
+    """Inline sparkline: line = share of particles switching class per
+    iteration, dashed = CONV_SETTLED, text = latest value."""
+    ymax = max(CONV_SETTLED * 1.2, max(v for _, v in pts))
+    px = lambda i: x + i * w / (len(pts) - 1)
+    py = lambda v: y + h - v / ymax * h
+    line = " ".join("%.1f,%.1f" % (px(i), py(v)) for i, (_, v) in enumerate(pts))
+    last = pts[-1][1]
+    color = "#2e7d32" if last <= CONV_SETTLED else "#e65100"
+    return ('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#bbb" stroke-dasharray="2 2"/>'
+            '<polyline points="%s" fill="none" stroke="%s" stroke-width="1.5"/>'
+            '<text x="%.1f" y="%.1f" fill="%s" font-size="9" text-anchor="end">%.1f%% switch/it%s</text>' %
+            (x, py(CONV_SETTLED), x + w, py(CONV_SETTLED), line, color, x + w, y - 2, color, last * 100,
+             "" if last <= CONV_SETTLED else " \u00b7 not converged"))
 
 
 def _card_layout(tree, job, thumbs):
@@ -146,10 +213,11 @@ def _card_layout(tree, job, thumbs):
         grid_w = cols * thumb_size + (cols - 1) * GRID_GAP
         grid_h = rows * thumb_size + (rows - 1) * GRID_GAP
 
+    conv = _convergence(tree, job)
     height = (HEADER_H + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
-              PADDING_BOTTOM + DETAILS_BTN_H)
+              (CONV_H if conv else 0) + PADDING_BOTTOM + DETAILS_BTN_H)
     return {
-        "label2": label2, "cols": cols, "thumb_size": thumb_size,
+        "label2": label2, "conv": conv, "cols": cols, "thumb_size": thumb_size,
         "grid_w": grid_w, "grid_h": grid_h, "height": height,
     }
 
@@ -172,6 +240,10 @@ def render_svg(tree):
         j: _job_thumbnails(tree["job_dirs"][j], tree["artifacts"].get(j, {}))
         for j in jobs
     }
+    for j, sel in tree.get("selection", {}).items():  # show the parent's classes, kept ones highlighted
+        hist = tree["classes"][sel["parent"]]
+        uris = class_iter_thumbs(tree["job_dirs"][sel["parent"]], hist[-1]["iter"], GRID_THUMB_SIZE)
+        thumbs[j] = [(i + 1, u) for i, u in enumerate(uris) if u]
     layouts = {j: _card_layout(tree, j, thumbs[j]) for j in jobs}
     card_sizes = {j: (CARD_W, layouts[j]["height"]) for j in jobs}
     pos = layout_positions(tree["layers"], card_sizes)
@@ -239,15 +311,27 @@ def render_svg(tree):
                 col, row = i % cols, i // cols
                 ix = grid_x + col * (size + GRID_GAP)
                 iy = grid_y + row * (size + GRID_GAP)
+                sel = tree.get("selection", {}).get(job)
+                hist = tree.get("classes", {}).get(sel["parent"] if sel else job) or []
+                kept = sel["flags"][num - 1] if sel and num and num <= len(sel["flags"]) else None
+                share = hist[-1]["shares"][num - 1] if num and hist and num <= len(hist[-1]["shares"]) else None
+                tiny = (share is not None and share < TINY_CLASS_SHARE) or kept is False
+                chosen_by = tree.get("chosen", {}).get(job, {}).get(num) if num else None
                 parts.append('<image x="%.1f" y="%.1f" width="%d" height="%d" '
-                              'href="%s" style="image-rendering: pixelated"/>' %
-                              (ix, iy, size, size, uri))
-                parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="#eee"/>' %
-                              (ix, iy, size, size))
+                              'href="%s" style="image-rendering: pixelated"%s/>' %
+                              (ix, iy, size, size, uri, ' opacity="0.35"' if tiny else ""))
+                parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="%s" stroke-width="%s"/>' %
+                              (ix, iy, size, size, "#2e7d32" if kept or chosen_by else "#eee", 3 if kept else 2 if chosen_by else 1))
+                if chosen_by:  # a Select job kept this class: green check badge on the thumbnail
+                    parts.append('<circle cx="%.1f" cy="%.1f" r="7" fill="#2e7d32"><title>kept by %s</title></circle>'
+                                  '<text x="%.1f" y="%.1f" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">\u2713</text>' %
+                                  (ix + size - 9, iy + 9, _esc(", ".join(chosen_by)), ix + size - 9, iy + 12.5))
                 if num is not None and len(job_thumbs) > 1:
                     parts.append('<text x="%.1f" y="%.1f" fill="#fff" font-size="9" '
                                   'font-weight="bold" stroke="#000" stroke-width="2" '
-                                  'paint-order="stroke">C%d</text>' % (ix + 3, iy + 11, num))
+                                  'paint-order="stroke">C%d%s</text>' %
+                                  (ix + 3, iy + 11, num, (" \u2713" if kept else " \u2717" if kept is False else "") +
+                                   (" %.0f%%" % (share * 100) if share is not None else "")))
             text_y = grid_y + lay["grid_h"] + 14
 
         parts.append('<text x="%.1f" y="%.1f" fill="%s">[%s]</text>' %
@@ -255,6 +339,10 @@ def render_svg(tree):
         if lay["label2"]:
             parts.append('<text x="%.1f" y="%.1f" fill="#555">%s</text>' %
                           (x + 8, text_y + 14, _esc(" / ".join(lay["label2"]))))
+
+        if lay["conv"]:
+            conv_y = text_y + (14 if lay["label2"] else 0) + 16
+            parts.append(_conv_svg(x + 8, conv_y, CARD_W - 16, CONV_H - 22, lay["conv"]))
 
         # A visibly clickable "Details" strip at the bottom of every card —
         # clicking anywhere on the card already opened the detail panel,
@@ -265,8 +353,9 @@ def render_svg(tree):
         parts.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#eee"/>' %
                       (x, btn_y, x + CARD_W, btn_y))
         parts.append('<text x="%.1f" y="%.1f" fill="%s" font-weight="bold" '
-                      'text-anchor="middle">Details &#8250;</text>' %
-                      (x + CARD_W / 2, btn_y + 14, type_color))
+                      'text-anchor="middle">%s &#8250;</text>' %
+                      (x + CARD_W / 2, btn_y + 14, type_color,
+                       "Classes &amp; details" if lay["conv"] or job in tree.get("selection", {}) else "Details"))
         parts.append('</g>')
 
     parts.append("</svg>")
