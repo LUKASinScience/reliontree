@@ -6,6 +6,7 @@ import html
 import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
+from .relion_classes import class_history
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
 
@@ -400,6 +401,29 @@ function renderJobList(filter) {{
   }}
 }}
 
+// Collapsed by default: last-iteration class shares (bars) plus the
+// per-iteration fraction of particles that switched class (converged = ~0).
+function classesBlock(hist) {{
+  if (!hist || !hist.length) return "";
+  const last = hist[hist.length - 1];
+  const bars = last.shares.map((s, i) =>
+    "<tr><td class=key>class " + (i + 1) + "</td><td><div style='background:var(--accent);height:8px;width:" +
+    Math.round(s * 100) + "%'></div>" + (s * 100).toFixed(1) + "%</td></tr>").join("");
+  const ch = hist.filter(h => h.changes_classes !== null);
+  let conv = "";
+  if (ch.length) {{
+    const w = 240, h = 40, max = Math.max(...ch.map(x => x.changes_classes), 0.01);
+    const pts = ch.map((x, i) => (ch.length > 1 ? i * w / (ch.length - 1) : 0).toFixed(1) + "," +
+      (h - x.changes_classes / max * h).toFixed(1)).join(" ");
+    conv = "<p class=note>Particles switching class per iteration: " +
+      (ch[ch.length - 1].changes_classes * 100).toFixed(1) + "% at it" + ch[ch.length - 1].iter +
+      " (peak " + (max * 100).toFixed(1) + "%)</p><svg width=" + w + " height=" + h +
+      "><polyline fill=none stroke='var(--accent)' stroke-width=2 points='" + pts + "'/></svg>";
+  }}
+  return "<details style='margin-top:12px'><summary>Classes (iteration " + last.iter + ")</summary>" +
+    "<table>" + bars + "</table>" + conv + "</details>";
+}}
+
 function selectJob(job) {{
   document.querySelectorAll(".job-item").forEach(el => {{
     el.classList.toggle("selected", el.dataset.job === job);
@@ -422,7 +446,7 @@ function selectJob(job) {{
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
     "<h2>" + esc(job) + "</h2>" +
     "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">What changed vs. parent job? &rarr;</button>" +
-    "<table>" + rows + "</table>";
+    "<table>" + rows + "</table>" + classesBlock(info.classes);
   openDrawer("detail");
 }}
 
@@ -546,6 +570,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
+            "classes": class_history(tree["job_dirs"][job]) if job_type(job) in ("Class2D", "Class3D") else [],
         }
     rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
     type_colors = {

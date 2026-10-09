@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
+from .relion_classes import class_overlap
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
@@ -122,6 +123,25 @@ def cmd_diff(args):
         if not result["varying"]:
             lines.append("  (none -- all identical)")
         _write("\n".join(lines), args.out)
+
+
+def cmd_overlap(args):
+    """Particle overlap between two Class2D/Class3D jobs (rows: job A's
+    classes, columns: job B's), from each job's final data.star."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    result = class_overlap(project / args.job_a, project / args.job_b)
+    if result is None:
+        raise ValueError("both jobs need a run_data.star / run_itNNN_data.star")
+    ca, cb, counts = result["classes_a"], result["classes_b"], result["counts"]
+    if args.format == "json":
+        _write(json.dumps({"classes_a": ca, "classes_b": cb,
+                           "counts": {"%d,%d" % k: v for k, v in counts.items()}}, indent=2), args.out)
+        return
+    lines = ["Particles: rows = %s class, columns = %s class" % (args.job_a, args.job_b),
+             "      " + "".join("%8d" % b for b in cb)]
+    for a in ca:
+        lines.append("%5d " % a + "".join("%8d" % counts.get((a, b), 0) for b in cb))
+    _write("\n".join(lines), args.out)
 
 
 def cmd_why(args):
@@ -401,6 +421,14 @@ def main(argv=None):
     sp.add_argument("--format", choices=["text", "json"], default="text")
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("overlap", help="particle overlap matrix between two classification jobs")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("job_a", help="e.g. Class3D/job010")
+    sp.add_argument("job_b", help="e.g. Class3D/job015")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_overlap)
 
     sp = sub.add_parser("why", help="why does this job exist: parent(s), siblings, and what changed from the parent")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
