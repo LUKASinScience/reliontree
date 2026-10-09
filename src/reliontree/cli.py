@@ -134,12 +134,12 @@ def cmd_overlap(args):
     result = class_overlap(project / args.job_a, project / args.job_b)
     if result is None:
         raise ValueError("both jobs need a run_data.star / run_itNNN_data.star")
-    ca, cb, counts = result["classes_a"], result["classes_b"], result["counts"]
+    ca, cb, counts = result["classes_a"], result["order_b"], result["counts"]
     if args.format == "json":
-        _write(json.dumps({"classes_a": ca, "classes_b": cb,
+        _write(json.dumps({"classes_a": ca, "classes_b": cb, "score": result["score"],
                            "counts": {"%d,%d" % k: v for k, v in counts.items()}}, indent=2), args.out)
         return
-    lines = ["Particles: rows = %s class, columns = %s class" % (args.job_a, args.job_b),
+    lines = ["Particles: rows = %s class, columns = %s class (columns ordered best-match first; %.0f%% of particles on the diagonal)" % (args.job_a, args.job_b, result["score"] * 100),
              "      " + "".join("%8d" % b for b in cb)]
     for a in ca:
         lines.append("%5d " % a + "".join("%8d" % counts.get((a, b), 0) for b in cb))
@@ -287,7 +287,8 @@ def _api(route, query, project):
         if result is None:
             return {"error": "no data.star in one of the jobs"}
         return {"classes_a": result["classes_a"], "classes_b": result["classes_b"],
-                "counts": {"%d,%d" % k: v for k, v in result["counts"].items()}}
+                "counts": {"%d,%d" % k: v for k, v in result["counts"].items()},
+                "order_b": result["order_b"], "score": result["score"]}
     except (ValueError, KeyError) as exc:
         return {"error": str(exc)}
 

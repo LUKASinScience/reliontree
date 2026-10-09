@@ -61,6 +61,16 @@ In the live view: check two or more jobs in the sidebar to enable "Compare",
 or open a job's Details drawer and click "Why this job?" — both run
 entirely client-side against data already on the page, no server round trip.
 
+Class2D/Class3D jobs get more in the live view: each card shows the class
+averages with their share of particles (near-empty classes dimmed, classes a
+Select job kept marked with a green check) and a convergence sparkline; the
+drawer adds an iteration slider, convergence and class-share charts, and
+advice when a classification hasn't converged (more iterations, more classes
+or fewer classes). "Compare" on 2+ classifications also shows the particle
+overlap heatmap between them. The sidebar can filter on convergence. The
+overlap heatmap and the iteration slider need `reliontree watch` (they load
+data on demand); a static `--format html` export shows the final iteration.
+
 Exit codes for the `tree`/`table`/`methods`/`diff`/`why` subcommands (for scripting):
 `0` ok, `1` no RELION project found, `2`
 parse/job-lookup error.
