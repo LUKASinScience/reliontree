@@ -11,17 +11,21 @@ try:
     from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
+    from .relion_classes import class_history
 except ImportError:
     from relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
     from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
+    from relion_classes import class_history
 
 CARD_W = 200
 HEADER_H = 40          # colored bar + type label + job id line
 FOOTER_LINE_H = 14     # each of the state / stats text lines below the grid
 DETAILS_BTN_H = 20     # visible "Details" button strip at the bottom of every card
 PADDING_BOTTOM = 6
+CONV_H = 36            # convergence sparkline strip on Class2D/Class3D cards
+CONV_SETTLED = 0.05    # dashed "settled" level, same as relion-copilot's rule
 SINGLE_THUMB_SIZE = 120
 GRID_THUMB_SIZE = 56
 GRID_COLS = 3
@@ -99,18 +103,19 @@ def build_tree(project_dir, selected=None, max_hops=None):
     lyrs = pipeline_layers(None, parents)  # `selected` arg is unused by layers()
 
     jobs = [j for layer in lyrs for j in layer]
-    artifacts, stats, options, job_dirs = {}, {}, {}, {}
+    artifacts, stats, options, job_dirs, classes = {}, {}, {}, {}, {}
     for job in jobs:
         job_dir = project_dir / job
         job_dirs[job] = job_dir
         artifacts[job] = scan_job_artifacts(job_dir)
         stats[job] = job_stats(job_dir)
         options[job] = parse_job_options(job_dir)
+        classes[job] = class_history(job_dir) if job_type(job) in ("Class2D", "Class3D") else []
 
     return {
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
-        "job_dirs": job_dirs,
+        "job_dirs": job_dirs, "classes": classes,
     }
 
 
@@ -120,6 +125,29 @@ def ordered_jobs(tree):
 
 def _esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _convergence(tree, job):
+    """[(iter, fraction switching class)] without the meaningless it0 row;
+    [] when the job has fewer than 2 points to draw."""
+    pts = [(h["iter"], h["changes_classes"]) for h in tree.get("classes", {}).get(job, [])
+           if h["changes_classes"] is not None and h["iter"] > 0]
+    return pts if len(pts) > 1 else []
+
+
+def _conv_svg(x, y, w, h, pts):
+    """Inline sparkline: line = share of particles switching class per
+    iteration, dashed = CONV_SETTLED, text = latest value."""
+    ymax = max(CONV_SETTLED * 1.2, max(v for _, v in pts))
+    px = lambda i: x + i * w / (len(pts) - 1)
+    py = lambda v: y + h - v / ymax * h
+    line = " ".join("%.1f,%.1f" % (px(i), py(v)) for i, (_, v) in enumerate(pts))
+    last = pts[-1][1]
+    color = "#2e7d32" if last <= CONV_SETTLED else "#e65100"
+    return ('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#bbb" stroke-dasharray="2 2"/>'
+            '<polyline points="%s" fill="none" stroke="%s" stroke-width="1.5"/>'
+            '<text x="%.1f" y="%.1f" fill="%s" font-size="9" text-anchor="end">%.1f%% switch/it</text>' %
+            (x, py(CONV_SETTLED), x + w, py(CONV_SETTLED), line, color, x + w, y - 2, color, last * 100))
 
 
 def _card_layout(tree, job, thumbs):
@@ -146,10 +174,11 @@ def _card_layout(tree, job, thumbs):
         grid_w = cols * thumb_size + (cols - 1) * GRID_GAP
         grid_h = rows * thumb_size + (rows - 1) * GRID_GAP
 
+    conv = _convergence(tree, job)
     height = (HEADER_H + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
-              PADDING_BOTTOM + DETAILS_BTN_H)
+              (CONV_H if conv else 0) + PADDING_BOTTOM + DETAILS_BTN_H)
     return {
-        "label2": label2, "cols": cols, "thumb_size": thumb_size,
+        "label2": label2, "conv": conv, "cols": cols, "thumb_size": thumb_size,
         "grid_w": grid_w, "grid_h": grid_h, "height": height,
     }
 
@@ -245,9 +274,12 @@ def render_svg(tree):
                 parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="#eee"/>' %
                               (ix, iy, size, size))
                 if num is not None and len(job_thumbs) > 1:
+                    hist = tree.get("classes", {}).get(job) or []
+                    share = hist[-1]["shares"][num - 1] if hist and num <= len(hist[-1]["shares"]) else None
                     parts.append('<text x="%.1f" y="%.1f" fill="#fff" font-size="9" '
                                   'font-weight="bold" stroke="#000" stroke-width="2" '
-                                  'paint-order="stroke">C%d</text>' % (ix + 3, iy + 11, num))
+                                  'paint-order="stroke">C%d%s</text>' %
+                                  (ix + 3, iy + 11, num, " %.0f%%" % (share * 100) if share is not None else ""))
             text_y = grid_y + lay["grid_h"] + 14
 
         parts.append('<text x="%.1f" y="%.1f" fill="%s">[%s]</text>' %
@@ -255,6 +287,10 @@ def render_svg(tree):
         if lay["label2"]:
             parts.append('<text x="%.1f" y="%.1f" fill="#555">%s</text>' %
                           (x + 8, text_y + 14, _esc(" / ".join(lay["label2"]))))
+
+        if lay["conv"]:
+            conv_y = text_y + (14 if lay["label2"] else 0) + 16
+            parts.append(_conv_svg(x + 8, conv_y, CARD_W - 16, CONV_H - 22, lay["conv"]))
 
         # A visibly clickable "Details" strip at the bottom of every card —
         # clicking anywhere on the card already opened the detail panel,
