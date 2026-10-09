@@ -66,6 +66,11 @@ _PAGE = """<!doctype html>
              padding: 16px; font-size: 13px; overflow-y: auto; overflow-x: hidden;
              transform: translateX(100%); transition: transform 0.15s ease; z-index: 20; }}
   .drawer.open {{ transform: translateX(0); }}
+  #detail {{ width: min(540px, 100vw); }}
+  .drawer .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px 0; }}
+  .drawer .chip {{ background: var(--neutral-bg); border-radius: 12px; padding: 2px 10px; font-size: 12px; }}
+  .drawer details.sec {{ border-top: 1px solid var(--border); padding: 8px 0; }}
+  .drawer details.sec > summary {{ font-weight: bold; font-size: 14px; cursor: pointer; padding: 4px 0; }}
   .drawer h2, .drawer h3, .modal-box h2, .modal-box h3 {{ margin: 0 0 12px 0; font-size: 15px; }}
   .drawer .close-btn, .modal-box .close-btn {{ float: right; border: none; background: none; font-size: 16px;
                          cursor: pointer; color: var(--text-muted); line-height: 1; }}
@@ -411,13 +416,13 @@ function classesBlock(hist, thumbs) {{
   const last = hist[hist.length - 1];
   const cards = last.shares.map((s, i) =>
     "<div style='display:flex;align-items:center;gap:8px;margin:4px 0'>" +
-    (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=56 height=56 style='border-radius:4px'>" : "") +
+    (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=80 height=80 style='border-radius:4px'>" : "") +
     "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%</div>" +
     "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
     CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>").join("");
   // it0 is the untrained start (switch rate is meaningless there) -- skip it.
   const ch = hist.filter(h => h.changes_classes !== null && h.iter > 0);
-  const W = 290, H = 120, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
+  const W = 480, H = 150, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
   function chart(title, series, ymax, yfmt, mark) {{
     const its = hist.filter(h => h.iter > 0), n = its.length;
     const X = k => L + k * (W - L - R) / Math.max(n - 1, 1), Y = v => T + (1 - v / ymax) * (H - T - B);
@@ -449,7 +454,7 @@ function classesBlock(hist, thumbs) {{
       last.shares.map((_, i) => [CLASS_COLORS[i % CLASS_COLORS.length], its.map(h => h.shares[i] || 0)]),
       Math.max(0.1, ...its.flatMap(h => h.shares)) * 1.1, v => (v * 100).toFixed(0) + "%", null);
   }}
-  return "<details style='margin-top:12px'><summary>Classes (iteration " + last.iter + ")</summary>" + cards + conv + "</details>";
+  return "<details class=sec open><summary>Classes &middot; iteration " + last.iter + "</summary>" + cards + conv + "</details>";
 }}
 
 function selectJob(job) {{
@@ -461,20 +466,21 @@ function selectJob(job) {{
 
   const info = JOBS[job];
   const detail = document.getElementById("detail");
-  let rows = "";
-  rows += "<tr><td class=key>state</td><td>" + esc(info.state) + "</td></tr>";
-  if (info.resolution_angstrom) rows += "<tr><td class=key>resolution</td><td>" + info.resolution_angstrom.toFixed(1) + " &Aring;</td></tr>";
-  if (info.n_particles) rows += "<tr><td class=key>particles</td><td>" + info.n_particles.toLocaleString() + "</td></tr>";
+  const chips = ["<span class=chip>" + esc(info.state) + "</span>"];
+  if (info.resolution_angstrom) chips.push("<span class=chip>" + info.resolution_angstrom.toFixed(1) + " &Aring;</span>");
+  if (info.n_particles) chips.push("<span class=chip>" + info.n_particles.toLocaleString() + " particles</span>");
   const runtime = formatDuration(info.runtime_seconds);
-  if (runtime) rows += "<tr><td class=key>runtime</td><td>" + runtime + "</td></tr>";
-  if (info.parents.length) rows += "<tr><td class=key>parents</td><td>" + info.parents.map(esc).join(", ") + "</td></tr>";
-  for (const k of Object.keys(info.options).sort()) {{
-    rows += "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>";
-  }}
+  if (runtime) chips.push("<span class=chip>" + runtime + "</span>");
+  const optKeys = Object.keys(info.options).sort();
+  const optRows = optKeys.map(k => "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>").join("");
+  const q = job.replace(/'/g, "\\\\'");
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
-    "<h2>" + esc(job) + "</h2>" +
-    "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">What changed vs. parent job? &rarr;</button>" +
-    "<table>" + rows + "</table>" + classesBlock(info.classes, info.class_thumbs);
+    "<h2>" + esc(job) + "</h2><div class=chips>" + chips.join("") + "</div>" +
+    classesBlock(info.classes, info.class_thumbs) +
+    "<details class=sec open><summary>Lineage</summary>" +
+    "<p class=note>Parents: " + (info.parents.map(esc).join(", ") || "(none)") + "</p>" +
+    "<button class='why-btn' onclick=\\"showWhy('" + q + "')\\">What changed vs. parent job? &rarr;</button></details>" +
+    "<details class=sec><summary>Parameters (" + optKeys.length + ")</summary><table>" + optRows + "</table></details>";
   openDrawer("detail");
 }}
 
