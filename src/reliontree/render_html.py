@@ -568,7 +568,11 @@ function classesBlock(job, hist, thumbs) {{
   let conv = "";
   if (ch.length > 1) {{
     const ymax = Math.max(0.06, ...ch.map(x => x.changes_classes)) * 1.1;
-    conv = chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
+    const lastCh = ch[ch.length - 1];
+    if (lastCh.changes_classes > SETTLED) conv += "<p style='margin:10px 0 0;color:#e65100;font-size:12px'><b>Not converged.</b> " +
+      (lastCh.iter > 20 ? "After " + lastCh.iter + " iterations a class is probably missing &mdash; try more classes (now " + last.shares.length + ") rather than more iterations."
+                        : "Only " + lastCh.iter + " iterations ran &mdash; continue with more iterations.") + "</p>";
+    conv += chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
       "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = 5%, settled)",
       [["var(--accent)", ch.map(x => x.changes_classes)]], ymax, v => (v * 100).toFixed(0) + "%", 0.05);
     // every class's share over the iterations, overlaid in one chart
