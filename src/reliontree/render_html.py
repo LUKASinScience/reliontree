@@ -7,7 +7,6 @@ import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_artifacts import list_class_maps
-from .relion_classes import class_history
 from .relion_mrc_thumb import mrc_slice_thumbnail
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
@@ -416,27 +415,39 @@ function classesBlock(hist, thumbs) {{
     "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%</div>" +
     "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
     CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>").join("");
-  const ch = hist.filter(h => h.changes_classes !== null);
-  let conv = "";
-  if (ch.length > 1) {{
-    const W = 280, H = 110, L = 34, B = 18, T = 6, R = 6;
-    const ymax = Math.max(0.06, ...ch.map(x => x.changes_classes)) * 1.1;
-    const X = i => L + i * (W - L - R) / (ch.length - 1), Y = v => T + (1 - v / ymax) * (H - T - B);
-    const pts = ch.map((x, i) => X(i).toFixed(1) + "," + Y(x.changes_classes).toFixed(1)).join(" ");
-    const axis = "var(--text-muted)";
-    conv = "<p class=note style='margin:10px 0 2px'>Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
-      "% of particles switched class in iteration " + ch[ch.length - 1].iter + "</p>" +
-      "<svg width=" + W + " height=" + H + " style='font-size:10px'>" +
+  // it0 is the untrained start (switch rate is meaningless there) -- skip it.
+  const ch = hist.filter(h => h.changes_classes !== null && h.iter > 0);
+  const W = 290, H = 120, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
+  function chart(title, series, ymax, yfmt, mark) {{
+    const its = hist.filter(h => h.iter > 0), n = its.length;
+    const X = k => L + k * (W - L - R) / Math.max(n - 1, 1), Y = v => T + (1 - v / ymax) * (H - T - B);
+    let g = "<p class=note style='margin:10px 0 2px'>" + title + "</p><svg width=" + W + " height=" + H + " style='font-size:10px'>" +
       "<line x1=" + L + " y1=" + (H - B) + " x2=" + (W - R) + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
       "<line x1=" + L + " y1=" + T + " x2=" + L + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
-      "<line x1=" + L + " y1=" + Y(0.05).toFixed(1) + " x2=" + (W - R) + " y2=" + Y(0.05).toFixed(1) +
-      " stroke='" + axis + "' stroke-dasharray='3 3'/>" +
-      "<text x=" + (L - 4) + " y=" + (Y(0.05) + 3).toFixed(1) + " text-anchor=end fill='" + axis + "'>5%</text>" +
-      "<text x=" + (L - 4) + " y=" + (H - B + 3) + " text-anchor=end fill='" + axis + "'>0</text>" +
-      "<text x=" + (L - 4) + " y=" + (T + 8) + " text-anchor=end fill='" + axis + "'>" + (ymax * 100).toFixed(0) + "%</text>" +
-      "<text x=" + L + " y=" + (H - 4) + " fill='" + axis + "'>it" + ch[0].iter + "</text>" +
-      "<text x=" + (W - R) + " y=" + (H - 4) + " text-anchor=end fill='" + axis + "'>it" + ch[ch.length - 1].iter + "</text>" +
-      "<polyline fill=none stroke='var(--accent)' stroke-width=2 points='" + pts + "'/></svg>";
+      "<text x=" + (L - 4) + " y=" + (H - B) + " text-anchor=end fill='" + axis + "'>0</text>" +
+      "<text x=" + (L - 4) + " y=" + (T + 8) + " text-anchor=end fill='" + axis + "'>" + yfmt(ymax) + "</text>" +
+      "<text x=" + L + " y=" + (H - 4) + " fill='" + axis + "'>it" + its[0].iter + "</text>" +
+      "<text x=" + (W - R) + " y=" + (H - 4) + " text-anchor=end fill='" + axis + "'>it" + its[n - 1].iter + "</text>";
+    if (mark !== null) g += "<line x1=" + L + " y1=" + Y(mark).toFixed(1) + " x2=" + (W - R) + " y2=" + Y(mark).toFixed(1) +
+      " stroke='" + axis + "' stroke-dasharray='3 3'/><text x=" + (W - R) + " y=" + (Y(mark) - 2).toFixed(1) +
+      " text-anchor=end fill='" + axis + "'>" + yfmt(mark) + "</text>";
+    for (const [color, vals] of series) {{
+      g += "<polyline fill=none stroke='" + color + "' stroke-width=2 points='" +
+        vals.map((v, k) => X(k).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") + "'/>";
+    }}
+    return g + "</svg>";
+  }}
+  let conv = "";
+  if (ch.length > 1) {{
+    const ymax = Math.max(0.06, ...ch.map(x => x.changes_classes)) * 1.1;
+    conv = chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
+      "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = 5%, settled)",
+      [["var(--accent)", ch.map(x => x.changes_classes)]], ymax, v => (v * 100).toFixed(0) + "%", 0.05);
+    // every class's share over the iterations, overlaid in one chart
+    const its = hist.filter(h => h.iter > 0);
+    conv += chart("Class share per iteration (all classes overlaid)",
+      last.shares.map((_, i) => [CLASS_COLORS[i % CLASS_COLORS.length], its.map(h => h.shares[i] || 0)]),
+      Math.max(0.1, ...its.flatMap(h => h.shares)) * 1.1, v => (v * 100).toFixed(0) + "%", null);
   }}
   return "<details style='margin-top:12px'><summary>Classes (iteration " + last.iter + ")</summary>" + cards + conv + "</details>";
 }}
@@ -589,7 +600,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "options": tree["options"].get(job, {}),
             "class_thumbs": [mrc_slice_thumbnail(m, size=72) for m in list_class_maps(tree["job_dirs"][job])]
                             if job_type(job) == "Class3D" else [],
-            "classes": class_history(tree["job_dirs"][job]) if job_type(job) in ("Class2D", "Class3D") else [],
+            "classes": tree["classes"].get(job, []),
         }
     rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
     type_colors = {
