@@ -469,14 +469,17 @@ function renderJobList(filter) {{
 // dashed line = the 5% "settled" level the copilot uses.
 const CLASS_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
 const classThumbCache = {{}};
-function classCards(hist, idx, thumbs) {{
+function classCards(hist, idx, thumbs, flags) {{
   const e = hist[idx];
   return e.shares.map((s, i) => {{
-    const tiny = s < TINY;
-    return "<div style='display:flex;align-items:center;gap:8px;margin:4px 0" + (tiny ? ";opacity:.45" : "") + "'>" +
+    const kept = flags ? flags[i] : null;
+    const tiny = kept === false || (kept === null && s < TINY);
+    return "<div style='display:flex;align-items:center;gap:8px;margin:4px 0" + (tiny ? ";opacity:.45" : "") +
+      (kept ? ";border-left:4px solid #2e7d32;padding-left:6px" : "") + "'>" +
       (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=80 height=80 style='border-radius:4px;cursor:zoom-in' title='enlarge' onclick='bigClass(" + i + ")'>" : "") +
       "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%" +
-      (tiny ? " &middot; nearly empty" : "") + "</div>" +
+      (kept === true ? " &middot; <b style='color:#2e7d32'>&#10003; selected</b>" : kept === false ? " &middot; discarded" :
+        tiny ? " &middot; nearly empty" : "") + "</div>" +
       "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
       CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>";
   }}).join("");
@@ -509,6 +512,25 @@ function bigClass(i) {{
   if (!INTERACTIVE) {{ const t = c.thumbs && c.thumbs[i]; if (t) show(t); return; }}
   fetch("/class-thumbs?job=" + encodeURIComponent(c.job) + "&it=" + e.iter + "&size=360")
     .then(r => r.json()).then(j => {{ if (j.thumbs && j.thumbs[i]) show(j.thumbs[i]); }}).catch(() => {{}});
+}}
+
+// "Select classes" job: the parent classification's classes at its final
+// iteration, kept ones marked (RELION only stores positional keep flags).
+function selectionBlock(info) {{
+  const sel = info.selection;
+  if (!sel) return "";
+  const hist = JOBS[sel.parent].classes, idx = hist.length - 1;
+  const kept = sel.flags.map((f, i) => f ? i + 1 : null).filter(x => x);
+  return "<details class=sec open><summary>Selected classes &middot; " + kept.length + " of " + sel.flags.length + " kept</summary>" +
+    "<p class=note>From " + esc(sel.parent) + " (iteration " + hist[idx].iter + "): class " + kept.join(", ") + "</p>" +
+    "<div id=selCards>" + classCards(hist, idx, info.class_thumbs, sel.flags) + "</div></details>";
+}}
+function paintSelection(info) {{
+  const sel = info.selection, hist = JOBS[sel.parent].classes, e = hist[hist.length - 1];
+  fetch("/class-thumbs?job=" + encodeURIComponent(sel.parent) + "&it=" + e.iter + "&size=80").then(r => r.json()).then(j => {{
+    const el = document.getElementById("selCards");
+    if (el) el.innerHTML = classCards(hist, hist.length - 1, j.thumbs || [], sel.flags);
+  }}).catch(() => {{}});
 }}
 
 // Collapsed-or-open section: class cards for the chosen iteration (slider),
@@ -577,12 +599,13 @@ function selectJob(job) {{
   const q = job.replace(/'/g, "\\\\'");
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
     "<h2>" + esc(job) + "</h2><div class=chips>" + chips.join("") + "</div>" +
-    classesBlock(job, info.classes, info.class_thumbs) +
+    classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
     "<details class=sec open><summary>Lineage</summary>" +
     "<p class=note>Parents: " + (info.parents.map(esc).join(", ") || "(none)") + "</p>" +
     "<button class='why-btn' onclick=\\"showWhy('" + q + "')\\">What changed vs. parent job? &rarr;</button></details>" +
     "<details class=sec><summary>Parameters (" + optKeys.length + ")</summary><table>" + optRows + "</table></details>";
   if (INTERACTIVE && info.classes && info.classes.length) setClassIter(info.classes.length - 1);
+  if (INTERACTIVE && info.selection) paintSelection(info);
   openDrawer("detail");
 }}
 
@@ -703,6 +726,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     for job in ordered_jobs(tree):
         artifacts = tree["artifacts"].get(job, {})
         stats = tree["stats"].get(job, {})
+        thumb_job = tree["selection"][job]["parent"] if job in tree["selection"] else job
         jobs[job] = {
             "state": artifacts.get("state", "unknown"),
             "resolution_angstrom": stats.get("resolution_angstrom"),
@@ -710,9 +734,10 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
+            "selection": tree["selection"].get(job),
             "class_thumbs": [] if interactive else (
-                class_iter_thumbs(tree["job_dirs"][job], tree["classes"][job][-1]["iter"], 80)
-                if tree["classes"].get(job) else []),
+                class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80)
+                if tree["classes"].get(thumb_job) else []),
             "classes": tree["classes"].get(job, []),
         }
     rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
