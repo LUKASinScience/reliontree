@@ -181,7 +181,7 @@ def _find_scalar_field(text, field_name):
     block's `_rlnCurrentResolution   22.996479` line. Field names are
     unique enough within a RELION model/postprocess star file that a direct
     regex search is reliable without a full STAR parser."""
-    m = re.search(r"^\s*" + re.escape(field_name) + r"\s+([\-0-9.eE]+)", text, re.MULTILINE)
+    m = re.search(r"^\s*" + re.escape(field_name) + r"\s+([\-+0-9.eE]+)", text, re.MULTILINE)
     return float(m.group(1)) if m else None
 
 
