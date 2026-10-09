@@ -36,3 +36,23 @@ def test_class_selection_flags(tmp_path):
     assert class_selection(tmp_path, 3) == [False, True, False]
     assert class_selection(tmp_path, 4) is None  # length mismatch (not a class-selection of this parent)
     assert class_selection(tmp_path / "nope", 3) is None
+
+
+def _hist(shares, changes, start=1):
+    return [{"iter": start + i, "shares": shares, "changes_classes": c} for i, c in enumerate(changes)]
+
+
+def test_class_advice_branches():
+    from reliontree.relion_classes import class_advice
+    assert class_advice(_hist([0.5, 0.5], [0.3, 0.2])) is None            # too short to judge
+    assert class_advice(_hist([0.5, 0.5], [0.3, 0.1, 0.01]))["action"] == "none"
+    assert class_advice(_hist([0.5, 0.5], [0.3, 0.2, 0.1]))["action"] == "more_iterations"
+    assert class_advice(_hist([0.5, 0.5], [0.3] * 25))["action"] == "more_classes"
+    assert class_advice(_hist([0.99, 0.01], [0.3] * 25))["action"] == "fewer_classes"
+
+
+def test_match_columns_finds_permutation():
+    from reliontree.relion_classes import match_columns
+    counts = {(1, 2): 90, (1, 1): 5, (2, 1): 80, (2, 2): 10}
+    order, score = match_columns([1, 2], [1, 2], counts)
+    assert order == [2, 1] and abs(score - 170 / 185) < 1e-9

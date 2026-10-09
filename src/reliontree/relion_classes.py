@@ -12,6 +12,12 @@ try:
 except ImportError:
     from relion_artifacts import _find_scalar_field, _loop_column_values
 
+# Single source of truth for the thresholds: the viewer (cards, drawer, JS)
+# and relion-copilot's rule all read these.
+SETTLED_CHANGES = 0.05    # <= this share of particles switching class per iteration = converged
+MANY_ITERATIONS = 20      # beyond this, still-switching particles point to class count, not iterations
+TINY_SHARE = 0.02         # a class below this share of the particles counts as (nearly) empty
+
 _ITER = re.compile(r"run_it(\d+)_model\.star$")
 
 
@@ -83,6 +89,46 @@ def class_iter_thumbs(job_dir, iteration, size=72):
     return out
 
 
+def class_advice(hist):
+    """Convergence verdict + next action for a classification's history
+    (`class_history`), or None if there are fewer than 3 iterations to judge.
+    {"converged": bool, "action": "none"|"more_iterations"|"more_classes"|"fewer_classes",
+     "switching": float, "iter": int, "message": str}.
+    Rules: <=5% switching = converged. Otherwise nearly-empty classes mean K
+    is already too high (-> fewer classes); else after more than 20
+    iterations a class is probably missing (-> more classes); else the run
+    was simply short (-> more iterations)."""
+    pts = [h for h in hist if h["changes_classes"] is not None and h["iter"] > 0]
+    if len(pts) < 3:
+        return None
+    last, shares = pts[-1], hist[-1]["shares"]
+    out = {"switching": last["changes_classes"], "iter": last["iter"]}
+    if last["changes_classes"] <= SETTLED_CHANGES:
+        return dict(out, converged=True, action="none", message="Converged: %.1f%% of particles switched class in iteration %d." % (last["changes_classes"] * 100, last["iter"]))
+    empty = [i + 1 for i, v in enumerate(shares) if v < TINY_SHARE]
+    if empty:
+        action, msg = "fewer_classes", "class %s nearly empty, so %d classes is already too many -- reduce the number of classes rather than adding more" % (", ".join(map(str, empty)), len(shares))
+    elif last["iter"] > MANY_ITERATIONS:
+        action, msg = "more_classes", "%d iterations already ran, so a class is probably missing -- increase the number of classes (now %d) rather than adding iterations" % (last["iter"], len(shares))
+    else:
+        action, msg = "more_iterations", "only %d iterations ran -- continue the classification (more iterations)" % last["iter"]
+    return dict(out, converged=False, action=action, message="Not converged (%.0f%% still switching): %s." % (last["changes_classes"] * 100, msg))
+
+
+def match_columns(classes_a, classes_b, counts):
+    """Greedy best-match column order for an overlap matrix: repeatedly
+    pair the largest remaining (a, b) cell, so a permuted-but-identical
+    classification shows up on the diagonal. Returns (order_b, score) where
+    score = matched particles / all particles."""
+    total = sum(counts.values()) or 1
+    used_a, used_b, matched, pairs = set(), set(), 0, {}
+    for (a, b), n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        if a not in used_a and b not in used_b:
+            used_a.add(a); used_b.add(b); matched += n; pairs[a] = b
+    order = [pairs[a] for a in classes_a if a in pairs] + [b for b in classes_b if b not in used_b]
+    return order, matched / total
+
+
 def _particle_classes(data_star):
     """{rlnImageName: rlnClassNumber} streamed from a data.star's particle loop."""
     classes = {}
@@ -130,5 +176,6 @@ def class_overlap(job_dir_a, job_dir_b):
         b = cb.get(name)
         if b is not None:
             counts[(a, b)] = counts.get((a, b), 0) + 1
-    return {"classes_a": sorted({a for a, _ in counts}), "classes_b": sorted({b for _, b in counts}),
-            "counts": counts}
+    ca_, cb_ = sorted({a for a, _ in counts}), sorted({b for _, b in counts})
+    order_b, score = match_columns(ca_, cb_, counts)
+    return {"classes_a": ca_, "classes_b": cb_, "counts": counts, "order_b": order_b, "score": score}

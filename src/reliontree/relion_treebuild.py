@@ -12,13 +12,13 @@ try:
     from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
-    from .relion_classes import class_history, class_selection, class_iter_thumbs
+    from .relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 except ImportError:
     from relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
     from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
-    from relion_classes import class_history, class_selection, class_iter_thumbs
+    from relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 
 CARD_W = 200
 HEADER_H = 40          # colored bar + type label + job id line
@@ -26,8 +26,8 @@ FOOTER_LINE_H = 14     # each of the state / stats text lines below the grid
 DETAILS_BTN_H = 20     # visible "Details" button strip at the bottom of every card
 PADDING_BOTTOM = 6
 CONV_H = 36            # convergence sparkline strip on Class2D/Class3D cards
-TINY_CLASS_SHARE = 0.02  # a class below this share is dimmed: almost certainly an empty/junk class
-CONV_SETTLED = 0.05    # dashed "settled" level, same as relion-copilot's rule
+TINY_CLASS_SHARE = TINY_SHARE      # a class below this share is dimmed: almost certainly an empty/junk class
+CONV_SETTLED = SETTLED_CHANGES     # dashed "settled" level
 SINGLE_THUMB_SIZE = 120
 GRID_THUMB_SIZE = 56
 GRID_COLS = 3
@@ -142,8 +142,15 @@ def build_tree(project_dir, selected=None, max_hops=None):
                 selection[job] = {"parent": parent, "flags": flags}
                 break
 
+    # which classes of a classification were kept by a Select job: {class job: {class number: [select jobs]}}
+    chosen = {}
+    for job, sel in selection.items():
+        for i, kept in enumerate(sel["flags"]):
+            if kept:
+                chosen.setdefault(sel["parent"], {}).setdefault(i + 1, []).append(job)
+
     return {
-        "selection": selection,
+        "selection": selection, "chosen": chosen,
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
         "job_dirs": job_dirs, "classes": classes,
@@ -309,11 +316,16 @@ def render_svg(tree):
                 kept = sel["flags"][num - 1] if sel and num and num <= len(sel["flags"]) else None
                 share = hist[-1]["shares"][num - 1] if num and hist and num <= len(hist[-1]["shares"]) else None
                 tiny = (share is not None and share < TINY_CLASS_SHARE) or kept is False
+                chosen_by = tree.get("chosen", {}).get(job, {}).get(num) if num else None
                 parts.append('<image x="%.1f" y="%.1f" width="%d" height="%d" '
                               'href="%s" style="image-rendering: pixelated"%s/>' %
                               (ix, iy, size, size, uri, ' opacity="0.35"' if tiny else ""))
                 parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="%s" stroke-width="%s"/>' %
-                              (ix, iy, size, size, "#2e7d32" if kept else "#eee", 3 if kept else 1))
+                              (ix, iy, size, size, "#2e7d32" if kept or chosen_by else "#eee", 3 if kept else 2 if chosen_by else 1))
+                if chosen_by:  # a Select job kept this class: green check badge on the thumbnail
+                    parts.append('<circle cx="%.1f" cy="%.1f" r="7" fill="#2e7d32"><title>kept by %s</title></circle>'
+                                  '<text x="%.1f" y="%.1f" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">\u2713</text>' %
+                                  (ix + size - 9, iy + 9, _esc(", ".join(chosen_by)), ix + size - 9, iy + 12.5))
                 if num is not None and len(job_thumbs) > 1:
                     parts.append('<text x="%.1f" y="%.1f" fill="#fff" font-size="9" '
                                   'font-weight="bold" stroke="#000" stroke-width="2" '
