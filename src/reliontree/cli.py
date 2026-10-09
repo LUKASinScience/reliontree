@@ -22,6 +22,8 @@ Exit codes (tree/table/methods/diff/why subcommands): 0 ok, 1 no RELION project 
 import argparse
 import html
 import json
+import os
+import re
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +31,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
+from .relion_classes import class_iter_thumbs, class_overlap
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
@@ -122,6 +125,25 @@ def cmd_diff(args):
         if not result["varying"]:
             lines.append("  (none -- all identical)")
         _write("\n".join(lines), args.out)
+
+
+def cmd_overlap(args):
+    """Particle overlap between two Class2D/Class3D jobs (rows: job A's
+    classes, columns: job B's), from each job's final data.star."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    result = class_overlap(project / args.job_a, project / args.job_b)
+    if result is None:
+        raise ValueError("both jobs need a run_data.star / run_itNNN_data.star")
+    ca, cb, counts = result["classes_a"], result["order_b"], result["counts"]
+    if args.format == "json":
+        _write(json.dumps({"classes_a": ca, "classes_b": cb, "score": result["score"],
+                           "counts": {"%d,%d" % k: v for k, v in counts.items()}}, indent=2), args.out)
+        return
+    lines = ["Particles: rows = %s class, columns = %s class (columns ordered best-match first; %.0f%% of particles on the diagonal)" % (args.job_a, args.job_b, result["score"] * 100),
+             "      " + "".join("%8d" % b for b in cb)]
+    for a in ca:
+        lines.append("%5d " % a + "".join("%8d" % counts.get((a, b), 0) for b in cb))
+    _write("\n".join(lines), args.out)
 
 
 def cmd_why(args):
@@ -244,6 +266,33 @@ def _render_picker_page(browse_dir, error=None):
     )
 
 
+_JOB_ID = re.compile(r"[A-Za-z0-9_]+/job\d+")
+
+
+def _api(route, query, project):
+    """JSON for the page's lazy requests: per-iteration class thumbnails and
+    two-job particle overlap. Job ids are matched against a strict pattern
+    so a query can't point outside the project directory."""
+    def job_dir(key):
+        job = query.get(key, [""])[0].rstrip("/")
+        if not _JOB_ID.fullmatch(job):
+            raise ValueError("bad job id %r" % job)
+        return project / job
+
+    try:
+        if route == "/class-thumbs":
+            size = min(int(query.get("size", ["72"])[0]), 400)
+            return {"thumbs": class_iter_thumbs(job_dir("job"), int(query["it"][0]), size)}
+        result = class_overlap(job_dir("a"), job_dir("b"))
+        if result is None:
+            return {"error": "no data.star in one of the jobs"}
+        return {"classes_a": result["classes_a"], "classes_b": result["classes_b"],
+                "counts": {"%d,%d" % k: v for k, v in result["counts"].items()},
+                "order_b": result["order_b"], "score": result["score"]}
+    except (ValueError, KeyError) as exc:
+        return {"error": str(exc)}
+
+
 def cmd_watch(args):
     """Stdlib-only live view: regenerates the tree HTML on every request
     (auto-refresh meta tag drives the browser reload) — no Flask/Streamlit,
@@ -276,6 +325,11 @@ def cmd_watch(args):
                     self.send_response(302)
                     self.send_header("Location", "/")
                     self.end_headers()
+                    return
+
+                route = urlsplit(self.path).path
+                if route in ("/class-thumbs", "/overlap") and state["project"] is not None:
+                    self._json(_api(route, query, state["project"]))
                     return
 
                 if state["project"] is None:
@@ -319,6 +373,14 @@ def cmd_watch(args):
                 self.end_headers()
                 self.wfile.write(str(exc).encode("utf-8"))
 
+        def _json(self, payload):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200 if "error" not in payload else 400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def log_message(self, format, *a):
             pass  # keep stdout clean; errors still surface via the page
 
@@ -340,12 +402,12 @@ def _default(project=None):
     login node with no browser/port available there)."""
     args = argparse.Namespace(
         project=project, job=None, max_hops=None,
-        port=8710, interval=10, no_open=False,
+        port=int(os.environ.get("RELIONTREE_PORT", 8710)), interval=10, no_open=False,
     )
     cmd_watch(args)
 
 
-_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "watch"}
+_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "overlap", "watch"}
 
 
 def main(argv=None):
@@ -401,6 +463,14 @@ def main(argv=None):
     sp.add_argument("--format", choices=["text", "json"], default="text")
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("overlap", help="particle overlap matrix between two classification jobs")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("job_a", help="e.g. Class3D/job010")
+    sp.add_argument("job_b", help="e.g. Class3D/job015")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_overlap)
 
     sp = sub.add_parser("why", help="why does this job exist: parent(s), siblings, and what changed from the parent")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
