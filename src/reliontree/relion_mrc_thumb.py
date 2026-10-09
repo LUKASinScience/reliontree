@@ -37,8 +37,8 @@ def _read_header(f):
     return nx, ny, nz, mode
 
 
-def _cache_path(path, stat, size):
-    key = "%s:%d:%d:%d" % (path, stat.st_mtime_ns, stat.st_size, size)
+def _cache_path(path, stat, size, z=None):
+    key = "%s:%d:%d:%d:%s" % (path, stat.st_mtime_ns, stat.st_size, size, z)
     return _CACHE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".b64")
 
 
@@ -57,22 +57,23 @@ def _png_bytes(pixels, w, h):
             chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
 
 
-def mrc_slice_thumbnail(path, size=160):
+def mrc_slice_thumbnail(path, size=160, z=None):
     """Return a `data:image/png;base64,...` URI for the middle Z-slice of
     the MRC volume at `path`, downsampled to roughly `size` px wide, or
-    None if the file is missing, too small, or not float32-mode. Cached
+    `z` picks the slice (default: middle -- for a Class2D `*_classes.mrcs`
+    stack, z is the class index). None if the file is missing, too small, or not float32-mode. Cached
     on disk keyed by (path, mtime, size, thumbnail size)."""
     try:
         stat = os.stat(path)
     except OSError:
         return None
-    cache_file = _cache_path(str(path), stat, size)
+    cache_file = _cache_path(str(path), stat, size, z)
     try:
         return "data:image/png;base64," + cache_file.read_text()
     except OSError:
         pass
 
-    uri = _render_thumbnail(path, size)
+    uri = _render_thumbnail(path, size, z)
     if uri is not None:
         try:
             _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,7 +83,7 @@ def mrc_slice_thumbnail(path, size=160):
     return uri
 
 
-def _render_thumbnail(path, size):
+def _render_thumbnail(path, size, z=None):
     try:
         with open(path, "rb") as f:
             nx, ny, nz, mode = _read_header(f)
@@ -93,7 +94,9 @@ def _render_thumbnail(path, size):
             out_h_rows = list(range(0, ny, step))
             # skip header + any extended header would need NSYMBT, but
             # RELION maps normally carry none; best-effort.
-            slice_index = nz // 2
+            slice_index = nz // 2 if z is None else z
+            if not 0 <= slice_index < nz:
+                return None
             slice_base = 1024 + slice_index * nx * ny * 4
             row_values = []
             for y in out_h_rows:
