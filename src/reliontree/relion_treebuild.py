@@ -4,17 +4,18 @@ behind both `relion_cli.py` (a plain terminal) and `cmd.py` (the ChimeraX
 command line). Pure stdlib only."""
 
 import re
+import struct
 from pathlib import Path
 
 try:
     from .relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
-    from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
+    from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
     from .relion_classes import class_history
 except ImportError:
     from relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
-    from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps
+    from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
     from relion_classes import class_history
@@ -25,6 +26,7 @@ FOOTER_LINE_H = 14     # each of the state / stats text lines below the grid
 DETAILS_BTN_H = 20     # visible "Details" button strip at the bottom of every card
 PADDING_BOTTOM = 6
 CONV_H = 36            # convergence sparkline strip on Class2D/Class3D cards
+TINY_CLASS_SHARE = 0.02  # a class below this share is dimmed: almost certainly an empty/junk class
 CONV_SETTLED = 0.05    # dashed "settled" level, same as relion-copilot's rule
 SINGLE_THUMB_SIZE = 120
 GRID_THUMB_SIZE = 56
@@ -57,11 +59,24 @@ def _class_number(path):
     return int(m.group(1)) if m else None
 
 
+def _stack_slices(path):
+    """Range of Z-slices (= classes) in an MRC stack, from its header."""
+    try:
+        with open(path, "rb") as f:
+            return range(struct.unpack("<3i", f.read(12))[2])
+    except (OSError, struct.error):
+        return range(0)
+
+
 def _job_maps(job_dir, artifacts):
     """[(class_number_or_None, path), ...] for everything a card should show
     a thumbnail for: every per-class volume when a job has more than one
     (Class2D/Class3D-style jobs), else its single most relevant map
     (postprocessed > latest class/refine map > mask)."""
+    stack = list_class_stack(job_dir)
+    if stack is not None:
+        n = max(1, len(_stack_slices(stack)))
+        return [(i + 1, (stack, i)) for i in range(n)]
     classes = list_class_maps(job_dir)
     if len(classes) > 1:
         return [(_class_number(p), p) for p in classes]
@@ -79,7 +94,10 @@ def _job_thumbnails(job_dir, artifacts):
     size = GRID_THUMB_SIZE if len(maps) > 1 else SINGLE_THUMB_SIZE
     out = []
     for num, path in maps:
-        uri = mrc_slice_thumbnail(path, size=size)
+        z = None
+        if isinstance(path, tuple):
+            path, z = path
+        uri = mrc_slice_thumbnail(path, size=size, z=z)
         if uri:
             out.append((num, uri))
     return out
@@ -146,8 +164,9 @@ def _conv_svg(x, y, w, h, pts):
     color = "#2e7d32" if last <= CONV_SETTLED else "#e65100"
     return ('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#bbb" stroke-dasharray="2 2"/>'
             '<polyline points="%s" fill="none" stroke="%s" stroke-width="1.5"/>'
-            '<text x="%.1f" y="%.1f" fill="%s" font-size="9" text-anchor="end">%.1f%% switch/it</text>' %
-            (x, py(CONV_SETTLED), x + w, py(CONV_SETTLED), line, color, x + w, y - 2, color, last * 100))
+            '<text x="%.1f" y="%.1f" fill="%s" font-size="9" text-anchor="end">%.1f%% switch/it%s</text>' %
+            (x, py(CONV_SETTLED), x + w, py(CONV_SETTLED), line, color, x + w, y - 2, color, last * 100,
+             "" if last <= CONV_SETTLED else " \u00b7 not converged"))
 
 
 def _card_layout(tree, job, thumbs):
@@ -268,14 +287,15 @@ def render_svg(tree):
                 col, row = i % cols, i // cols
                 ix = grid_x + col * (size + GRID_GAP)
                 iy = grid_y + row * (size + GRID_GAP)
+                hist = tree.get("classes", {}).get(job) or []
+                share = hist[-1]["shares"][num - 1] if num and hist and num <= len(hist[-1]["shares"]) else None
+                tiny = share is not None and share < TINY_CLASS_SHARE
                 parts.append('<image x="%.1f" y="%.1f" width="%d" height="%d" '
-                              'href="%s" style="image-rendering: pixelated"/>' %
-                              (ix, iy, size, size, uri))
+                              'href="%s" style="image-rendering: pixelated"%s/>' %
+                              (ix, iy, size, size, uri, ' opacity="0.35"' if tiny else ""))
                 parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="#eee"/>' %
                               (ix, iy, size, size))
                 if num is not None and len(job_thumbs) > 1:
-                    hist = tree.get("classes", {}).get(job) or []
-                    share = hist[-1]["shares"][num - 1] if hist and num <= len(hist[-1]["shares"]) else None
                     parts.append('<text x="%.1f" y="%.1f" fill="#fff" font-size="9" '
                                   'font-weight="bold" stroke="#000" stroke-width="2" '
                                   'paint-order="stroke">C%d%s</text>' %
