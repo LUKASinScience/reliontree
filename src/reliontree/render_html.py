@@ -6,6 +6,7 @@ import html
 import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
+from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
 
@@ -64,6 +65,11 @@ _PAGE = """<!doctype html>
              padding: 16px; font-size: 13px; overflow-y: auto; overflow-x: hidden;
              transform: translateX(100%); transition: transform 0.15s ease; z-index: 20; }}
   .drawer.open {{ transform: translateX(0); }}
+  #detail {{ width: min(540px, 100vw); }}
+  .drawer .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px 0; }}
+  .drawer .chip {{ background: var(--neutral-bg); border-radius: 12px; padding: 2px 10px; font-size: 12px; }}
+  .drawer details.sec {{ border-top: 1px solid var(--border); padding: 8px 0; }}
+  .drawer details.sec > summary {{ font-weight: bold; font-size: 14px; cursor: pointer; padding: 4px 0; }}
   .drawer h2, .drawer h3, .modal-box h2, .modal-box h3 {{ margin: 0 0 12px 0; font-size: 15px; }}
   .drawer .close-btn, .modal-box .close-btn {{ float: right; border: none; background: none; font-size: 16px;
                          cursor: pointer; color: var(--text-muted); line-height: 1; }}
@@ -107,6 +113,13 @@ _PAGE = """<!doctype html>
       <option value="unknown">unknown</option>
     </select>
   </div>
+  <div style="margin:0 12px 8px;">
+    <select id="convFilter" style="width:100%;" title="Class2D/Class3D only: share of particles still switching class in the last iteration">
+      <option value="">any convergence</option>
+      <option value="open">not converged (&gt;5% switching)</option>
+      <option value="done">converged (&le;5% switching)</option>
+    </select>
+  </div>
   <div id="compareBar">
     <span id="compareCount">0 selected</span>
     <button id="compareBtn" disabled onclick="showCompare()">Compare</button>
@@ -131,7 +144,7 @@ _PAGE = """<!doctype html>
 </div>
 <div class="wrap" id="tableView" style="display:none">
   <table id="jobTable"><thead><tr>
-    <th>Job</th><th>Type</th><th>State</th><th>Parent(s)</th><th>Resolution</th><th>Particles</th>
+    <th>Job</th><th>Type</th><th>State</th><th>Parent(s)</th><th>Resolution</th><th>Particles</th><th>Switch/it</th>
   </tr></thead><tbody></tbody></table>
 </div>
 </div>
@@ -269,12 +282,41 @@ function showCompare() {{
       jobs.map(j => "<td>" + esc(varying[k][j]) + "</td>").join("") + "</tr>";
   }}
   const header = "<tr><th>Parameter</th>" + jobs.map(j => "<th>" + esc(j) + "</th>").join("") + "</tr>";
-  const body = "<h2>Compare " + jobs.length + " jobs</h2>" +
+  let body = "<h2>Compare " + jobs.length + " jobs</h2>" +
     "<table class=diff><thead>" + header + "</thead><tbody>" +
     (rows || "<tr><td class=note colspan=" + (jobs.length + 1) + ">(all identical)</td></tr>") +
     "</tbody></table>";
+  const clsJobs = jobs.filter(j => (JOBS[j].classes || []).length).sort();
+  if (clsJobs.length > 1) {{
+    body += "<h3 style='margin-top:20px'>Particle overlap between classifications</h3>";
+    if (!INTERACTIVE) body += "<p class=note>Overlap is computed live &mdash; run <code>reliontree watch</code> to see it here, or <code>reliontree overlap</code> on the command line.</p>";
+    for (let i = 0; i + 1 < clsJobs.length && INTERACTIVE; i++) body += "<div class=overlap data-a='" + esc(clsJobs[i]) + "' data-b='" + esc(clsJobs[i + 1]) + "'><p class=note>loading " + esc(clsJobs[i]) + " &rarr; " + esc(clsJobs[i + 1]) + "&hellip;</p></div>";
+  }}
   document.getElementById("compareModalBody").innerHTML = body;
   document.getElementById("compareModal").classList.add("open");
+  document.querySelectorAll("#compareModalBody .overlap").forEach(el => loadOverlap(el));
+}}
+
+// Heatmap: row = class of job A, column = class of job B, cell shade and %
+// = share of that A class's particles that ended up in that B class.
+function loadOverlap(el) {{
+  const a = el.dataset.a, b = el.dataset.b;
+  fetch("/overlap?a=" + encodeURIComponent(a) + "&b=" + encodeURIComponent(b)).then(r => r.json()).then(j => {{
+    if (j.error) {{ el.innerHTML = "<p class=note>" + esc(a) + " &rarr; " + esc(b) + ": " + esc(j.error) + "</p>"; return; }}
+    const cnt = (x, y) => j.counts[x + "," + y] || 0;
+    let t = "<p style='margin:12px 0 4px'><b>" + esc(a) + "</b> (rows) &rarr; <b>" + esc(b) + "</b> (columns, best match first), % of each row's particles &mdash; <b>" +
+      Math.round(j.score * 100) + "%</b> of particles on the diagonal</p><table class=diff style='width:auto'><tr><td></td>" +
+      j.order_b.map(y => "<th>c" + y + "</th>").join("") + "</tr>";
+    for (const x of j.classes_a) {{
+      const tot = j.classes_b.reduce((sum, y) => sum + cnt(x, y), 0) || 1;
+      t += "<tr><th>c" + x + "</th>" + j.order_b.map(y => {{
+        const f = cnt(x, y) / tot;
+        return "<td title='" + cnt(x, y).toLocaleString() + " particles' style='text-align:center;min-width:48px;padding:6px;background:color-mix(in srgb, var(--accent) " +
+          Math.round(f * 100) + "%, transparent)'>" + (f * 100).toFixed(0) + "%</td>";
+      }}).join("") + "</tr>";
+    }}
+    el.innerHTML = t + "</table>";
+  }}).catch(() => {{ el.innerHTML = "<p class=note>overlap request failed</p>"; }});
 }}
 
 function closeCompareModal() {{
@@ -319,6 +361,19 @@ function toggleView() {{
   try {{ sessionStorage.setItem("reliontree.view", showingTable ? "tree" : "table"); }} catch (e) {{}}
 }}
 
+const SETTLED = {settled}, TINY = {tiny};
+// Share of particles that switched class in the last iteration (it0 is the
+// untrained start and meaningless); null for non-classification jobs.
+function switchRate(job) {{
+  const h = (JOBS[job].classes || []).filter(x => x.changes_classes !== null && x.iter > 0);
+  return h.length > 1 ? h[h.length - 1].changes_classes : null;
+}}
+function switchHtml(job) {{
+  const r = switchRate(job);
+  if (r === null) return "";
+  return "<span style='color:" + (r <= SETTLED ? "#2e7d32" : "#e65100") + "'>" + (r * 100).toFixed(1) + "%</span>";
+}}
+
 function renderTableView() {{
   const body = document.querySelector("#jobTable tbody");
   body.innerHTML = "";
@@ -332,7 +387,8 @@ function renderTableView() {{
       "'>" + esc(info.state) + "</span></td>" +
       "<td>" + esc(info.parents.join(", ")) + "</td>" +
       "<td>" + (info.resolution_angstrom ? info.resolution_angstrom.toFixed(1) + " Å" : "") + "</td>" +
-      "<td>" + (info.n_particles ? info.n_particles.toLocaleString() : "") + "</td>";
+      "<td>" + (info.n_particles ? info.n_particles.toLocaleString() : "") + "</td>" +
+      "<td>" + switchHtml(job) + "</td>";
     body.appendChild(tr);
   }}
 }}
@@ -341,11 +397,16 @@ function renderJobList(filter) {{
   const list = document.getElementById("jobList");
   const typeFilter = document.getElementById("typeFilter").value;
   const stateFilter = document.getElementById("stateFilter").value;
+  const convFilter = document.getElementById("convFilter").value;
   list.innerHTML = "";
   for (const job of Object.keys(JOBS)) {{
     if (filter && job.toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
     if (typeFilter && jobType(job) !== typeFilter) continue;
     if (stateFilter && JOBS[job].state !== stateFilter) continue;
+    if (convFilter) {{
+      const r = switchRate(job);
+      if (r === null || (convFilter === "open") !== (r > SETTLED)) continue;
+    }}
     const div = document.createElement("div");
     div.className = "job-item";
     div.dataset.job = job;
@@ -394,10 +455,134 @@ function renderJobList(filter) {{
     if (info.resolution_angstrom) extra += info.resolution_angstrom.toFixed(1) + "Å";
     if (info.n_particles) extra += (extra ? "  " : "") + info.n_particles.toLocaleString();
     if (extra) meta.appendChild(document.createTextNode(extra));
+    const sw = document.createElement("span");
+    sw.innerHTML = switchHtml(job) ? "&#8635; " + switchHtml(job) : "";
+    sw.title = "particles switching class in the last iteration";
+    meta.appendChild(sw);
     div.appendChild(meta);
 
     list.appendChild(div);
   }}
+}}
+
+// Collapsed by default. One card per class (map thumbnail, share bar) and
+// a convergence chart: % of particles that switched class each iteration,
+// dashed line = the 5% "settled" level the copilot uses.
+const CLASS_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
+const classThumbCache = {{}};
+function chosenBy(job, i) {{ const c = job && JOBS[job].chosen[i + 1]; return c ? c.join(", ") : ""; }}
+function classCards(hist, idx, thumbs, flags, job) {{
+  const e = hist[idx];
+  return e.shares.map((s, i) => {{
+    const kept = flags ? flags[i] : null;
+    const tiny = kept === false || (kept === null && s < TINY);
+    return "<div style='display:flex;align-items:center;gap:8px;margin:4px 0" + (tiny ? ";opacity:.45" : "") +
+      (kept ? ";border-left:4px solid #2e7d32;padding-left:6px" : "") + "'>" +
+      (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=80 height=80 style='border-radius:4px;cursor:zoom-in' title='enlarge' onclick='bigClass(" + i + ")'>" : "") +
+      "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%" +
+      (chosenBy(job, i) ? " &middot; <b style='color:#2e7d32'>&#10003; kept by " + esc(chosenBy(job, i)) + "</b>" : "") +
+      (kept === true ? " &middot; <b style='color:#2e7d32'>&#10003; selected</b>" : kept === false ? " &middot; discarded" :
+        tiny ? " &middot; nearly empty" : "") + "</div>" +
+      "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
+      CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>";
+  }}).join("");
+}}
+
+// Slider over iterations (watch mode: thumbnails are fetched per iteration
+// on demand; a static export only has the final iteration's thumbnails).
+let classCtx = null;
+function setClassIter(idx) {{
+  const c = classCtx, e = c.hist[idx];
+  c.idx = idx;
+  document.getElementById("classIterLabel").textContent = "iteration " + e.iter;
+  const paint = th => {{ if (c.idx === idx) document.getElementById("classCards").innerHTML = classCards(c.hist, idx, th, null, c.job); }};
+  if (!INTERACTIVE) {{ paint(idx === c.hist.length - 1 ? c.thumbs : null); return; }}
+  const key = c.job + "@" + e.iter;
+  if (classThumbCache[key]) {{ paint(classThumbCache[key]); return; }}
+  paint(null);
+  fetch("/class-thumbs?job=" + encodeURIComponent(c.job) + "&it=" + e.iter + "&size=80")
+    .then(r => r.json()).then(j => {{ classThumbCache[key] = j.thumbs || []; paint(classThumbCache[key]); }}).catch(() => {{}});
+}}
+
+function bigClass(i) {{
+  const c = classCtx, e = c.hist[c.idx];
+  const key = c.job + "@" + e.iter;
+  const show = uri => {{
+    document.getElementById("compareModalBody").innerHTML = "<h2>" + esc(c.job) + " &middot; class " + (i + 1) + " &middot; iteration " +
+      e.iter + "</h2><img src='" + uri + "' style='width:min(100%,520px);image-rendering:auto;border-radius:6px'>";
+    document.getElementById("compareModal").classList.add("open");
+  }};
+  if (!INTERACTIVE) {{ const t = c.thumbs && c.thumbs[i]; if (t) show(t); return; }}
+  fetch("/class-thumbs?job=" + encodeURIComponent(c.job) + "&it=" + e.iter + "&size=360")
+    .then(r => r.json()).then(j => {{ if (j.thumbs && j.thumbs[i]) show(j.thumbs[i]); }}).catch(() => {{}});
+}}
+
+// "Select classes" job: the parent classification's classes at its final
+// iteration, kept ones marked (RELION only stores positional keep flags).
+function selectionBlock(info) {{
+  const sel = info.selection;
+  if (!sel) return "";
+  const hist = JOBS[sel.parent].classes, idx = hist.length - 1;
+  const kept = sel.flags.map((f, i) => f ? i + 1 : null).filter(x => x);
+  return "<details class=sec open><summary>Selected classes &middot; " + kept.length + " of " + sel.flags.length + " kept</summary>" +
+    "<p class=note>From " + esc(sel.parent) + " (iteration " + hist[idx].iter + "): class " + kept.join(", ") + "</p>" +
+    "<div id=selCards>" + classCards(hist, idx, info.class_thumbs, sel.flags) + "</div></details>";
+}}
+function paintSelection(info) {{
+  const sel = info.selection, hist = JOBS[sel.parent].classes, e = hist[hist.length - 1];
+  fetch("/class-thumbs?job=" + encodeURIComponent(sel.parent) + "&it=" + e.iter + "&size=80").then(r => r.json()).then(j => {{
+    const el = document.getElementById("selCards");
+    if (el) el.innerHTML = classCards(hist, hist.length - 1, j.thumbs || [], sel.flags);
+  }}).catch(() => {{}});
+}}
+
+// Collapsed-or-open section: class cards for the chosen iteration (slider),
+// a convergence chart, and every class's share over the iterations overlaid.
+function classesBlock(job, hist, thumbs) {{
+  if (!hist || !hist.length) return "";
+  const last = hist[hist.length - 1];
+  classCtx = {{job: job, hist: hist, thumbs: thumbs, idx: hist.length - 1}};
+  const slider = hist.length > 1 ?
+    "<div style='display:flex;align-items:center;gap:8px;margin:4px 0 8px'><input type=range min=0 max=" + (hist.length - 1) +
+    " value=" + (hist.length - 1) + " style='flex:1' oninput='setClassIter(+this.value)'><span id=classIterLabel class=note>iteration " + last.iter + "</span></div>" : "<span id=classIterLabel hidden></span>";
+  const cards = "<div id=classCards>" + classCards(hist, hist.length - 1, thumbs, null, job) + "</div>";
+  // it0 is the untrained start (switch rate is meaningless there) -- skip it.
+  const ch = hist.filter(h => h.changes_classes !== null && h.iter > 0);
+  const W = 480, H = 150, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
+  function chart(title, series, ymax, yfmt, mark) {{
+    const its = hist.filter(h => h.iter > 0), n = its.length;
+    const X = k => L + k * (W - L - R) / Math.max(n - 1, 1), Y = v => T + (1 - v / ymax) * (H - T - B);
+    let g = "<p class=note style='margin:10px 0 2px'>" + title + "</p><svg width=" + W + " height=" + H + " style='font-size:10px'>" +
+      "<line x1=" + L + " y1=" + (H - B) + " x2=" + (W - R) + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
+      "<line x1=" + L + " y1=" + T + " x2=" + L + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
+      "<text x=" + (L - 4) + " y=" + (H - B) + " text-anchor=end fill='" + axis + "'>0</text>" +
+      "<text x=" + (L - 4) + " y=" + (T + 8) + " text-anchor=end fill='" + axis + "'>" + yfmt(ymax) + "</text>" +
+      "<text x=" + L + " y=" + (H - 4) + " fill='" + axis + "'>it" + its[0].iter + "</text>" +
+      "<text x=" + (W - R) + " y=" + (H - 4) + " text-anchor=end fill='" + axis + "'>it" + its[n - 1].iter + "</text>";
+    if (mark !== null) g += "<line x1=" + L + " y1=" + Y(mark).toFixed(1) + " x2=" + (W - R) + " y2=" + Y(mark).toFixed(1) +
+      " stroke='" + axis + "' stroke-dasharray='3 3'/><text x=" + (W - R) + " y=" + (Y(mark) - 2).toFixed(1) +
+      " text-anchor=end fill='" + axis + "'>" + yfmt(mark) + "</text>";
+    for (const [color, vals] of series) {{
+      g += "<polyline fill=none stroke='" + color + "' stroke-width=2 points='" +
+        vals.map((v, k) => X(k).toFixed(1) + "," + Y(v).toFixed(1)).join(" ") + "'/>";
+    }}
+    return g + "</svg>";
+  }}
+  let conv = "";
+  if (ch.length > 1) {{
+    const ymax = Math.max(SETTLED * 1.2, ...ch.map(x => x.changes_classes)) * 1.1;
+    const adv = JOBS[job].advice;
+    if (adv && !adv.converged) conv += "<p style='margin:10px 0 0;color:#e65100;font-size:12px'><b>" + esc(adv.message) + "</b></p>";
+    conv += chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
+      "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = " + (SETTLED * 100) + "%, settled)",
+      [["var(--accent)", ch.map(x => x.changes_classes)]], ymax, v => (v * 100).toFixed(0) + "%", SETTLED);
+    // every class's share over the iterations, overlaid in one chart
+    const its = hist.filter(h => h.iter > 0);
+    conv += chart("Class share per iteration (all classes overlaid)",
+      last.shares.map((_, i) => [CLASS_COLORS[i % CLASS_COLORS.length], its.map(h => h.shares[i] || 0)]),
+      Math.max(0.1, ...its.flatMap(h => h.shares)) * 1.1, v => (v * 100).toFixed(0) + "%", null);
+  }}
+  return "<details class=sec open><summary>Classes</summary>" + slider + cards + conv + "</details>";
 }}
 
 function selectJob(job) {{
@@ -409,20 +594,23 @@ function selectJob(job) {{
 
   const info = JOBS[job];
   const detail = document.getElementById("detail");
-  let rows = "";
-  rows += "<tr><td class=key>state</td><td>" + esc(info.state) + "</td></tr>";
-  if (info.resolution_angstrom) rows += "<tr><td class=key>resolution</td><td>" + info.resolution_angstrom.toFixed(1) + " &Aring;</td></tr>";
-  if (info.n_particles) rows += "<tr><td class=key>particles</td><td>" + info.n_particles.toLocaleString() + "</td></tr>";
+  const chips = ["<span class=chip>" + esc(info.state) + "</span>"];
+  if (info.resolution_angstrom) chips.push("<span class=chip>" + info.resolution_angstrom.toFixed(1) + " &Aring;</span>");
+  if (info.n_particles) chips.push("<span class=chip>" + info.n_particles.toLocaleString() + " particles</span>");
   const runtime = formatDuration(info.runtime_seconds);
-  if (runtime) rows += "<tr><td class=key>runtime</td><td>" + runtime + "</td></tr>";
-  if (info.parents.length) rows += "<tr><td class=key>parents</td><td>" + info.parents.map(esc).join(", ") + "</td></tr>";
-  for (const k of Object.keys(info.options).sort()) {{
-    rows += "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>";
-  }}
+  if (runtime) chips.push("<span class=chip>" + runtime + "</span>");
+  const optKeys = Object.keys(info.options).sort();
+  const optRows = optKeys.map(k => "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>").join("");
+  const q = job.replace(/'/g, "\\\\'");
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
-    "<h2>" + esc(job) + "</h2>" +
-    "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">What changed vs. parent job? &rarr;</button>" +
-    "<table>" + rows + "</table>";
+    "<h2>" + esc(job) + "</h2><div class=chips>" + chips.join("") + "</div>" +
+    classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
+    "<details class=sec open><summary>Lineage</summary>" +
+    "<p class=note>Parents: " + (info.parents.map(esc).join(", ") || "(none)") + "</p>" +
+    "<button class='why-btn' onclick=\\"showWhy('" + q + "')\\">What changed vs. parent job? &rarr;</button></details>" +
+    "<details class=sec><summary>Parameters (" + optKeys.length + ")</summary><table>" + optRows + "</table></details>";
+  if (INTERACTIVE && info.classes && info.classes.length) setClassIter(info.classes.length - 1);
+  if (INTERACTIVE && info.selection) paintSelection(info);
   openDrawer("detail");
 }}
 
@@ -440,7 +628,9 @@ for (const t of Array.from(new Set(Object.keys(JOBS).map(jobType))).sort()) {{
 // across reloads in sessionStorage (survives the reload, not a new tab).
 const jobFilterEl = document.getElementById("jobFilter");
 const stateFilterEl = document.getElementById("stateFilter");
+const convFilterEl = document.getElementById("convFilter");
 try {{
+  convFilterEl.value = sessionStorage.getItem("reliontree.convFilter") || "";
   jobFilterEl.value = sessionStorage.getItem("reliontree.jobFilter") || "";
   typeFilterEl.value = sessionStorage.getItem("reliontree.typeFilter") || "";
   stateFilterEl.value = sessionStorage.getItem("reliontree.stateFilter") || "";
@@ -451,12 +641,14 @@ function onFilterChange() {{
     sessionStorage.setItem("reliontree.jobFilter", jobFilterEl.value);
     sessionStorage.setItem("reliontree.typeFilter", typeFilterEl.value);
     sessionStorage.setItem("reliontree.stateFilter", stateFilterEl.value);
+    sessionStorage.setItem("reliontree.convFilter", convFilterEl.value);
   }} catch (e) {{}}
   renderJobList(jobFilterEl.value);
 }}
 jobFilterEl.addEventListener("input", onFilterChange);
 typeFilterEl.addEventListener("change", onFilterChange);
 stateFilterEl.addEventListener("change", onFilterChange);
+convFilterEl.addEventListener("change", onFilterChange);
 renderJobList(jobFilterEl.value);
 
 try {{
@@ -539,6 +731,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     for job in ordered_jobs(tree):
         artifacts = tree["artifacts"].get(job, {})
         stats = tree["stats"].get(job, {})
+        thumb_job = tree["selection"][job]["parent"] if job in tree["selection"] else job
         jobs[job] = {
             "state": artifacts.get("state", "unknown"),
             "resolution_angstrom": stats.get("resolution_angstrom"),
@@ -546,6 +739,13 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
+            "selection": tree["selection"].get(job),
+            "chosen": tree["chosen"].get(job, {}),
+            "advice": class_advice(tree["classes"].get(job, [])),
+            "class_thumbs": [] if interactive else (
+                class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80)
+                if tree["classes"].get(thumb_job) else []),
+            "classes": tree["classes"].get(job, []),
         }
     rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
     type_colors = {
@@ -560,5 +760,6 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         auto_refresh_seconds=refresh_seconds or 0,
         scope_banner=scope_banner,
         interactive_json=json.dumps(bool(interactive)),
+        settled=SETTLED_CHANGES, tiny=TINY_SHARE,
         type_colors_json=json.dumps(type_colors),
     )

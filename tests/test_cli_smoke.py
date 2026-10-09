@@ -200,13 +200,17 @@ def test_zero_config_no_project_starts_picker(tmp_path):
     `reliontree` no longer exits with an error — it starts the watch
     server anyway with a bare directory-picker start screen, so there's
     always something to click through to a project."""
+    import socket
+    with socket.socket() as sock:  # a free port, so a `watch` already running on 8710 can't break the test
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
     proc = subprocess.Popen(
         [sys.executable, "-m", "reliontree.cli"],
         cwd=str(tmp_path),
         # BROWSER=true: a no-op "browser" so webbrowser.open() returns
         # instantly instead of hanging while it hunts for a real one in
         # this headless/sandboxed test environment.
-        env={"PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"), "BROWSER": "true"},
+        env={"PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"), "BROWSER": "true", "RELIONTREE_PORT": str(port)},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
@@ -214,7 +218,7 @@ def test_zero_config_no_project_starts_picker(tmp_path):
         deadline = time.time() + 5
         while time.time() < deadline:
             try:
-                body = urllib.request.urlopen("http://127.0.0.1:8710/", timeout=0.5).read().decode()
+                body = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=0.5).read().decode()
                 break
             except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
                 time.sleep(0.1)
