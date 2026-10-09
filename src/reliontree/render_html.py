@@ -6,7 +6,7 @@ import html
 import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
-from .relion_classes import class_iter_thumbs
+from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
 
@@ -304,11 +304,12 @@ function loadOverlap(el) {{
   fetch("/overlap?a=" + encodeURIComponent(a) + "&b=" + encodeURIComponent(b)).then(r => r.json()).then(j => {{
     if (j.error) {{ el.innerHTML = "<p class=note>" + esc(a) + " &rarr; " + esc(b) + ": " + esc(j.error) + "</p>"; return; }}
     const cnt = (x, y) => j.counts[x + "," + y] || 0;
-    let t = "<p style='margin:12px 0 4px'><b>" + esc(a) + "</b> (rows) &rarr; <b>" + esc(b) + "</b> (columns), % of each row's particles</p><table class=diff style='width:auto'><tr><td></td>" +
-      j.classes_b.map(y => "<th>c" + y + "</th>").join("") + "</tr>";
+    let t = "<p style='margin:12px 0 4px'><b>" + esc(a) + "</b> (rows) &rarr; <b>" + esc(b) + "</b> (columns, best match first), % of each row's particles &mdash; <b>" +
+      Math.round(j.score * 100) + "%</b> of particles on the diagonal</p><table class=diff style='width:auto'><tr><td></td>" +
+      j.order_b.map(y => "<th>c" + y + "</th>").join("") + "</tr>";
     for (const x of j.classes_a) {{
       const tot = j.classes_b.reduce((sum, y) => sum + cnt(x, y), 0) || 1;
-      t += "<tr><th>c" + x + "</th>" + j.classes_b.map(y => {{
+      t += "<tr><th>c" + x + "</th>" + j.order_b.map(y => {{
         const f = cnt(x, y) / tot;
         return "<td title='" + cnt(x, y).toLocaleString() + " particles' style='text-align:center;min-width:48px;padding:6px;background:color-mix(in srgb, var(--accent) " +
           Math.round(f * 100) + "%, transparent)'>" + (f * 100).toFixed(0) + "%</td>";
@@ -360,7 +361,7 @@ function toggleView() {{
   try {{ sessionStorage.setItem("reliontree.view", showingTable ? "tree" : "table"); }} catch (e) {{}}
 }}
 
-const SETTLED = 0.05, TINY = 0.02;
+const SETTLED = {settled}, TINY = {tiny};
 // Share of particles that switched class in the last iteration (it0 is the
 // untrained start and meaningless); null for non-classification jobs.
 function switchRate(job) {{
@@ -469,7 +470,8 @@ function renderJobList(filter) {{
 // dashed line = the 5% "settled" level the copilot uses.
 const CLASS_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
 const classThumbCache = {{}};
-function classCards(hist, idx, thumbs, flags) {{
+function chosenBy(job, i) {{ const c = job && JOBS[job].chosen[i + 1]; return c ? c.join(", ") : ""; }}
+function classCards(hist, idx, thumbs, flags, job) {{
   const e = hist[idx];
   return e.shares.map((s, i) => {{
     const kept = flags ? flags[i] : null;
@@ -478,6 +480,7 @@ function classCards(hist, idx, thumbs, flags) {{
       (kept ? ";border-left:4px solid #2e7d32;padding-left:6px" : "") + "'>" +
       (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=80 height=80 style='border-radius:4px;cursor:zoom-in' title='enlarge' onclick='bigClass(" + i + ")'>" : "") +
       "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%" +
+      (chosenBy(job, i) ? " &middot; <b style='color:#2e7d32'>&#10003; kept by " + esc(chosenBy(job, i)) + "</b>" : "") +
       (kept === true ? " &middot; <b style='color:#2e7d32'>&#10003; selected</b>" : kept === false ? " &middot; discarded" :
         tiny ? " &middot; nearly empty" : "") + "</div>" +
       "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
@@ -492,7 +495,7 @@ function setClassIter(idx) {{
   const c = classCtx, e = c.hist[idx];
   c.idx = idx;
   document.getElementById("classIterLabel").textContent = "iteration " + e.iter;
-  const paint = th => {{ if (c.idx === idx) document.getElementById("classCards").innerHTML = classCards(c.hist, idx, th); }};
+  const paint = th => {{ if (c.idx === idx) document.getElementById("classCards").innerHTML = classCards(c.hist, idx, th, null, c.job); }};
   if (!INTERACTIVE) {{ paint(idx === c.hist.length - 1 ? c.thumbs : null); return; }}
   const key = c.job + "@" + e.iter;
   if (classThumbCache[key]) {{ paint(classThumbCache[key]); return; }}
@@ -542,7 +545,7 @@ function classesBlock(job, hist, thumbs) {{
   const slider = hist.length > 1 ?
     "<div style='display:flex;align-items:center;gap:8px;margin:4px 0 8px'><input type=range min=0 max=" + (hist.length - 1) +
     " value=" + (hist.length - 1) + " style='flex:1' oninput='setClassIter(+this.value)'><span id=classIterLabel class=note>iteration " + last.iter + "</span></div>" : "<span id=classIterLabel hidden></span>";
-  const cards = "<div id=classCards>" + classCards(hist, hist.length - 1, thumbs) + "</div>";
+  const cards = "<div id=classCards>" + classCards(hist, hist.length - 1, thumbs, null, job) + "</div>";
   // it0 is the untrained start (switch rate is meaningless there) -- skip it.
   const ch = hist.filter(h => h.changes_classes !== null && h.iter > 0);
   const W = 480, H = 150, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
@@ -567,14 +570,12 @@ function classesBlock(job, hist, thumbs) {{
   }}
   let conv = "";
   if (ch.length > 1) {{
-    const ymax = Math.max(0.06, ...ch.map(x => x.changes_classes)) * 1.1;
-    const lastCh = ch[ch.length - 1];
-    if (lastCh.changes_classes > SETTLED) conv += "<p style='margin:10px 0 0;color:#e65100;font-size:12px'><b>Not converged.</b> " +
-      (lastCh.iter > 20 ? "After " + lastCh.iter + " iterations a class is probably missing &mdash; try more classes (now " + last.shares.length + ") rather than more iterations."
-                        : "Only " + lastCh.iter + " iterations ran &mdash; continue with more iterations.") + "</p>";
+    const ymax = Math.max(SETTLED * 1.2, ...ch.map(x => x.changes_classes)) * 1.1;
+    const adv = JOBS[job].advice;
+    if (adv && !adv.converged) conv += "<p style='margin:10px 0 0;color:#e65100;font-size:12px'><b>" + esc(adv.message) + "</b></p>";
     conv += chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
-      "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = 5%, settled)",
-      [["var(--accent)", ch.map(x => x.changes_classes)]], ymax, v => (v * 100).toFixed(0) + "%", 0.05);
+      "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = " + (SETTLED * 100) + "%, settled)",
+      [["var(--accent)", ch.map(x => x.changes_classes)]], ymax, v => (v * 100).toFixed(0) + "%", SETTLED);
     // every class's share over the iterations, overlaid in one chart
     const its = hist.filter(h => h.iter > 0);
     conv += chart("Class share per iteration (all classes overlaid)",
@@ -739,6 +740,8 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
             "selection": tree["selection"].get(job),
+            "chosen": tree["chosen"].get(job, {}),
+            "advice": class_advice(tree["classes"].get(job, [])),
             "class_thumbs": [] if interactive else (
                 class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80)
                 if tree["classes"].get(thumb_job) else []),
@@ -757,5 +760,6 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         auto_refresh_seconds=refresh_seconds or 0,
         scope_banner=scope_banner,
         interactive_json=json.dumps(bool(interactive)),
+        settled=SETTLED_CHANGES, tiny=TINY_SHARE,
         type_colors_json=json.dumps(type_colors),
     )
