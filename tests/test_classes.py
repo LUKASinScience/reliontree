@@ -28,3 +28,11 @@ def test_api_rejects_path_traversal(tmp_path):
     assert "error" in _api("/overlap", {"a": ["../etc/x"], "b": ["Class3D/job001"]}, tmp_path)
     assert "error" in _api("/class-thumbs", {"job": ["Class3D/job1/../../x"], "it": ["1"]}, tmp_path)
     assert _api("/class-thumbs", {"job": ["Class3D/job001"], "it": ["1"]}, tmp_path) == {"thumbs": []}
+
+
+def test_class_selection_flags(tmp_path):
+    from reliontree.relion_classes import class_selection
+    (tmp_path / "backup_selection.star").write_text("data_\n\nloop_\n_rlnSelected #1\n0\n1\n0\n")
+    assert class_selection(tmp_path, 3) == [False, True, False]
+    assert class_selection(tmp_path, 4) is None  # length mismatch (not a class-selection of this parent)
+    assert class_selection(tmp_path / "nope", 3) is None

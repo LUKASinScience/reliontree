@@ -12,13 +12,13 @@ try:
     from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
-    from .relion_classes import class_history
+    from .relion_classes import class_history, class_selection, class_iter_thumbs
 except ImportError:
     from relion_pipeline import load_pipeline, build_parents, upstream, limit_hops, layers as pipeline_layers
     from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
-    from relion_classes import class_history
+    from relion_classes import class_history, class_selection, class_iter_thumbs
 
 CARD_W = 200
 HEADER_H = 40          # colored bar + type label + job id line
@@ -130,7 +130,20 @@ def build_tree(project_dir, selected=None, max_hops=None):
         options[job] = parse_job_options(job_dir)
         classes[job] = class_history(job_dir) if job_type(job) in ("Class2D", "Class3D") else []
 
+    # Select-classes jobs: which of the parent classification's classes were kept
+    selection = {}
+    for job in jobs:
+        if job_type(job) != "Select":
+            continue
+        for parent in sorted(parents.get(job, [])):
+            hist = classes.get(parent)
+            flags = class_selection(job_dirs[job], len(hist[-1]["shares"])) if hist else None
+            if flags:
+                selection[job] = {"parent": parent, "flags": flags}
+                break
+
     return {
+        "selection": selection,
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
         "job_dirs": job_dirs, "classes": classes,
@@ -220,6 +233,10 @@ def render_svg(tree):
         j: _job_thumbnails(tree["job_dirs"][j], tree["artifacts"].get(j, {}))
         for j in jobs
     }
+    for j, sel in tree.get("selection", {}).items():  # show the parent's classes, kept ones highlighted
+        hist = tree["classes"][sel["parent"]]
+        uris = class_iter_thumbs(tree["job_dirs"][sel["parent"]], hist[-1]["iter"], GRID_THUMB_SIZE)
+        thumbs[j] = [(i + 1, u) for i, u in enumerate(uris) if u]
     layouts = {j: _card_layout(tree, j, thumbs[j]) for j in jobs}
     card_sizes = {j: (CARD_W, layouts[j]["height"]) for j in jobs}
     pos = layout_positions(tree["layers"], card_sizes)
@@ -287,19 +304,22 @@ def render_svg(tree):
                 col, row = i % cols, i // cols
                 ix = grid_x + col * (size + GRID_GAP)
                 iy = grid_y + row * (size + GRID_GAP)
-                hist = tree.get("classes", {}).get(job) or []
+                sel = tree.get("selection", {}).get(job)
+                hist = tree.get("classes", {}).get(sel["parent"] if sel else job) or []
+                kept = sel["flags"][num - 1] if sel and num and num <= len(sel["flags"]) else None
                 share = hist[-1]["shares"][num - 1] if num and hist and num <= len(hist[-1]["shares"]) else None
-                tiny = share is not None and share < TINY_CLASS_SHARE
+                tiny = (share is not None and share < TINY_CLASS_SHARE) or kept is False
                 parts.append('<image x="%.1f" y="%.1f" width="%d" height="%d" '
                               'href="%s" style="image-rendering: pixelated"%s/>' %
                               (ix, iy, size, size, uri, ' opacity="0.35"' if tiny else ""))
-                parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="#eee"/>' %
-                              (ix, iy, size, size))
+                parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" fill="none" stroke="%s" stroke-width="%s"/>' %
+                              (ix, iy, size, size, "#2e7d32" if kept else "#eee", 3 if kept else 1))
                 if num is not None and len(job_thumbs) > 1:
                     parts.append('<text x="%.1f" y="%.1f" fill="#fff" font-size="9" '
                                   'font-weight="bold" stroke="#000" stroke-width="2" '
                                   'paint-order="stroke">C%d%s</text>' %
-                                  (ix + 3, iy + 11, num, " %.0f%%" % (share * 100) if share is not None else ""))
+                                  (ix + 3, iy + 11, num, (" \u2713" if kept else " \u2717" if kept is False else "") +
+                                   (" %.0f%%" % (share * 100) if share is not None else "")))
             text_y = grid_y + lay["grid_h"] + 14
 
         parts.append('<text x="%.1f" y="%.1f" fill="%s">[%s]</text>' %
@@ -323,7 +343,7 @@ def render_svg(tree):
         parts.append('<text x="%.1f" y="%.1f" fill="%s" font-weight="bold" '
                       'text-anchor="middle">%s &#8250;</text>' %
                       (x + CARD_W / 2, btn_y + 14, type_color,
-                       "Classes &amp; details" if lay["conv"] else "Details"))
+                       "Classes &amp; details" if lay["conv"] or job in tree.get("selection", {}) else "Details"))
         parts.append('</g>')
 
     parts.append("</svg>")
