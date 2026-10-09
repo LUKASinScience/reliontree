@@ -6,7 +6,9 @@ import html
 import json
 
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
+from .relion_artifacts import list_class_maps
 from .relion_classes import class_history
+from .relion_mrc_thumb import mrc_slice_thumbnail
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
 
@@ -401,27 +403,42 @@ function renderJobList(filter) {{
   }}
 }}
 
-// Collapsed by default: last-iteration class shares (bars) plus the
-// per-iteration fraction of particles that switched class (converged = ~0).
-function classesBlock(hist) {{
+// Collapsed by default. One card per class (map thumbnail, share bar) and
+// a convergence chart: % of particles that switched class each iteration,
+// dashed line = the 5% "settled" level the copilot uses.
+const CLASS_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
+function classesBlock(hist, thumbs) {{
   if (!hist || !hist.length) return "";
   const last = hist[hist.length - 1];
-  const bars = last.shares.map((s, i) =>
-    "<tr><td class=key>class " + (i + 1) + "</td><td><div style='background:var(--accent);height:8px;width:" +
-    Math.round(s * 100) + "%'></div>" + (s * 100).toFixed(1) + "%</td></tr>").join("");
+  const cards = last.shares.map((s, i) =>
+    "<div style='display:flex;align-items:center;gap:8px;margin:4px 0'>" +
+    (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=56 height=56 style='border-radius:4px'>" : "") +
+    "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%</div>" +
+    "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
+    CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>").join("");
   const ch = hist.filter(h => h.changes_classes !== null);
   let conv = "";
-  if (ch.length) {{
-    const w = 240, h = 40, max = Math.max(...ch.map(x => x.changes_classes), 0.01);
-    const pts = ch.map((x, i) => (ch.length > 1 ? i * w / (ch.length - 1) : 0).toFixed(1) + "," +
-      (h - x.changes_classes / max * h).toFixed(1)).join(" ");
-    conv = "<p class=note>Particles switching class per iteration: " +
-      (ch[ch.length - 1].changes_classes * 100).toFixed(1) + "% at it" + ch[ch.length - 1].iter +
-      " (peak " + (max * 100).toFixed(1) + "%)</p><svg width=" + w + " height=" + h +
-      "><polyline fill=none stroke='var(--accent)' stroke-width=2 points='" + pts + "'/></svg>";
+  if (ch.length > 1) {{
+    const W = 280, H = 110, L = 34, B = 18, T = 6, R = 6;
+    const ymax = Math.max(0.06, ...ch.map(x => x.changes_classes)) * 1.1;
+    const X = i => L + i * (W - L - R) / (ch.length - 1), Y = v => T + (1 - v / ymax) * (H - T - B);
+    const pts = ch.map((x, i) => X(i).toFixed(1) + "," + Y(x.changes_classes).toFixed(1)).join(" ");
+    const axis = "var(--text-muted)";
+    conv = "<p class=note style='margin:10px 0 2px'>Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
+      "% of particles switched class in iteration " + ch[ch.length - 1].iter + "</p>" +
+      "<svg width=" + W + " height=" + H + " style='font-size:10px'>" +
+      "<line x1=" + L + " y1=" + (H - B) + " x2=" + (W - R) + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
+      "<line x1=" + L + " y1=" + T + " x2=" + L + " y2=" + (H - B) + " stroke='" + axis + "'/>" +
+      "<line x1=" + L + " y1=" + Y(0.05).toFixed(1) + " x2=" + (W - R) + " y2=" + Y(0.05).toFixed(1) +
+      " stroke='" + axis + "' stroke-dasharray='3 3'/>" +
+      "<text x=" + (L - 4) + " y=" + (Y(0.05) + 3).toFixed(1) + " text-anchor=end fill='" + axis + "'>5%</text>" +
+      "<text x=" + (L - 4) + " y=" + (H - B + 3) + " text-anchor=end fill='" + axis + "'>0</text>" +
+      "<text x=" + (L - 4) + " y=" + (T + 8) + " text-anchor=end fill='" + axis + "'>" + (ymax * 100).toFixed(0) + "%</text>" +
+      "<text x=" + L + " y=" + (H - 4) + " fill='" + axis + "'>it" + ch[0].iter + "</text>" +
+      "<text x=" + (W - R) + " y=" + (H - 4) + " text-anchor=end fill='" + axis + "'>it" + ch[ch.length - 1].iter + "</text>" +
+      "<polyline fill=none stroke='var(--accent)' stroke-width=2 points='" + pts + "'/></svg>";
   }}
-  return "<details style='margin-top:12px'><summary>Classes (iteration " + last.iter + ")</summary>" +
-    "<table>" + bars + "</table>" + conv + "</details>";
+  return "<details style='margin-top:12px'><summary>Classes (iteration " + last.iter + ")</summary>" + cards + conv + "</details>";
 }}
 
 function selectJob(job) {{
@@ -446,7 +463,7 @@ function selectJob(job) {{
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
     "<h2>" + esc(job) + "</h2>" +
     "<button class='why-btn' onclick=\\"showWhy('" + job.replace(/'/g, "\\\\'") + "')\\">What changed vs. parent job? &rarr;</button>" +
-    "<table>" + rows + "</table>" + classesBlock(info.classes);
+    "<table>" + rows + "</table>" + classesBlock(info.classes, info.class_thumbs);
   openDrawer("detail");
 }}
 
@@ -570,6 +587,8 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
             "options": tree["options"].get(job, {}),
+            "class_thumbs": [mrc_slice_thumbnail(m, size=72) for m in list_class_maps(tree["job_dirs"][job])]
+                            if job_type(job) == "Class3D" else [],
             "classes": class_history(tree["job_dirs"][job]) if job_type(job) in ("Class2D", "Class3D") else [],
         }
     rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
