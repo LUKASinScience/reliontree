@@ -152,7 +152,7 @@ can write it:
 `level` is `good`, `warn`, `bad` or `info`. One file per tool, so writers never
 overwrite each other; malformed entries are ignored and text is length-capped.
 Any script can write such a file. Two companion tools of the same author do (relion-origin: per-particle QC and
-orientation gaps; relion-copilot: next-step proposals); they are not public yet. reliontree does not need them:
+orientation gaps; relion-copilot: next-step proposals); relion-origin is [on GitHub](https://github.com/LUKASinScience/relion-origin), relion-copilot is not public. reliontree does not need either:
 it has no dependencies, never imports them, and shows what it finds on its own (project type, orientation globe)
 without them.
 
