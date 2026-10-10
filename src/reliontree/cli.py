@@ -35,6 +35,7 @@ from .relion_classes import class_iter_thumbs, class_overlap
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
+from .relion_orientation import job_orientation
 from . import relion_plan
 from .relion_project import ProjectNotFoundError, find_project
 from .render_html import render_html
@@ -308,6 +309,9 @@ def _api(route, query, project):
         if route == "/class-thumbs":
             size = min(int(query.get("size", ["72"])[0]), 400)
             return {"thumbs": class_iter_thumbs(job_dir("job"), int(query["it"][0]), size)}
+        if route == "/orientation":
+            cls = query.get("cls", [""])[0]
+            return job_orientation(job_dir("job"), int(cls) if cls.isdigit() else None) or {"error": "no angular distribution (angdist.bild) in this job"}
         result = class_overlap(job_dir("a"), job_dir("b"))
         if result is None:
             return {"error": "no data.star in one of the jobs"}
@@ -353,7 +357,7 @@ def cmd_watch(args):
                     return
 
                 route = urlsplit(self.path).path
-                if route in ("/class-thumbs", "/overlap") and state["project"] is not None:
+                if route in ("/class-thumbs", "/overlap", "/orientation") and state["project"] is not None:
                     self._json(_api(route, query, state["project"]))
                     return
 
