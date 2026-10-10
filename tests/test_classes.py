@@ -42,13 +42,17 @@ def _hist(shares, changes, start=1):
     return [{"iter": start + i, "shares": shares, "changes_classes": c} for i, c in enumerate(changes)]
 
 
-def test_class_advice_branches():
-    from reliontree.relion_classes import class_advice
-    assert class_advice(_hist([0.5, 0.5], [0.3, 0.2])) is None            # too short to judge
-    assert class_advice(_hist([0.5, 0.5], [0.3, 0.1, 0.01]))["action"] == "none"
-    assert class_advice(_hist([0.5, 0.5], [0.3, 0.2, 0.1]))["action"] == "more_iterations"
-    assert class_advice(_hist([0.5, 0.5], [0.3] * 25))["action"] == "more_classes"
-    assert class_advice(_hist([0.99, 0.01], [0.3] * 25))["action"] == "fewer_classes"
+def test_class_convergence_states_facts_and_gives_no_recommendation():
+    from reliontree.relion_classes import class_convergence
+    assert class_convergence(_hist([0.5, 0.5], [0.3, 0.2])) is None            # too short to judge
+    done = class_convergence(_hist([0.5, 0.5], [0.3, 0.1, 0.01]))
+    assert done["converged"] and "Converged" in done["message"]
+    open_ = class_convergence(_hist([0.5, 0.5], [0.3] * 25))
+    assert not open_["converged"] and open_["iter"] == 25 and "30.0%" in open_["message"]
+    assert "more" not in open_["message"].lower() and "increase" not in open_["message"].lower()   # no advice in the viewer
+    empty = class_convergence(_hist([0.99, 0.01], [0.3] * 25))
+    assert empty["empty_classes"] == [2] and "Nearly empty: class 2" in empty["message"]
+
 
 
 def test_match_columns_finds_permutation():

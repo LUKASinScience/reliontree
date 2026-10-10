@@ -8,7 +8,7 @@ import json
 from .view_assets import VIEW_CSS, VIEW_JS
 from .relion_orientation import has_orientation, job_orientation
 from .relion_treebuild import pick_classes, render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
-from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
+from .relion_classes import class_convergence, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
 
@@ -675,7 +675,7 @@ function classesBlock(job, hist, thumbs) {{
   let conv = "";
   if (ch.length > 1) {{
     const ymax = Math.max(SETTLED * 1.2, ...ch.map(x => x.changes_classes)) * 1.1;
-    const adv = JOBS[job].advice;
+    const adv = JOBS[job].convergence;
     if (adv && !adv.converged) conv += "<p style='margin:10px 0 0;color:#e65100;font-size:12px'><b>" + esc(adv.message) + "</b></p>";
     conv += chart("Convergence: " + (ch[ch.length - 1].changes_classes * 100).toFixed(1) +
       "% of particles switched class in iteration " + ch[ch.length - 1].iter + " (dashed = " + (SETTLED * 100) + "%, settled)",
@@ -917,7 +917,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "options": tree["options"].get(job, {}),
             "selection": tree["selection"].get(job),
             "chosen": tree["chosen"].get(job, {}),
-            "advice": class_advice(tree["classes"].get(job, [])),
+            "convergence": class_convergence(tree["classes"].get(job, [])),
             "class_thumbs": [] if interactive else (
                 class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80,
                                   only=pick_classes(tree, thumb_job))
