@@ -33,6 +33,9 @@ VIEW_CSS = """
   .job-item .job-label { flex: 1 1 40px; }
   .flag { font-size: 11px; } .lvl-bad { color: #c62828; } .lvl-warn { color: #e65100; } .lvl-info { color: #546e7a; } .lvl-good { color: #2e7d32; }
   .lvl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: currentColor; }
+  #globeBox canvas { display: block; margin: 4px auto; cursor: grab; touch-action: none; }
+  #globeBox .globe-bar { display: flex; gap: 8px; align-items: center; justify-content: center; font-size: 12px; flex-wrap: wrap; }
+  #globeBox .legend { height: 8px; width: 120px; border-radius: 4px; background: linear-gradient(90deg, #3b6fd4, #35b6b0, #f2d03b, #e0452f); }
   .exp-badge { font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-bg); border-radius: 999px; padding: 2px 10px; margin-left: 8px; vertical-align: middle; }
   .missing-toggle { padding: 6px 12px; font-size: 11px; color: var(--text-muted); cursor: pointer; border-bottom: 1px solid var(--border); }
   .missing-toggle:hover { background: var(--neutral-bg); }
@@ -333,5 +336,89 @@ function restorePaths() {
   if (saved) for (const k of ["A", "B"]) PATH[k] = saved[k] && (saved[k] === "@latest" || JOBS[saved[k]]) ? saved[k] : null;
   if (vp && isFinite(vp.scale)) Object.assign(view, vp);
   applyPaths(!!vp);
+}
+
+// ---------- orientation globe: where the particles look from (RELION's angdist.bild) ----------
+// Directions with particles are coloured by how many; the grey rest of the sphere is where nothing was seen.
+// Drag to rotate. The axes are the reference's x (red), y (green) and z (blue).
+function heat(w) {
+  const stops = [[0, [59, 111, 212]], [0.35, [53, 182, 176]], [0.65, [242, 208, 59]], [1, [224, 69, 47]]];
+  w = Math.max(0, Math.min(1, w));
+  for (let i = 1; i < stops.length; i++) if (w <= stops[i][0]) {
+    const [a, ca] = stops[i - 1], [b, cb] = stops[i], t = (w - a) / (b - a);
+    return "rgb(" + ca.map((v, k) => Math.round(v + (cb[k] - v) * t)).join(",") + ")";
+  }
+  return "rgb(224,69,47)";
+}
+function loadGlobe(job, cls) {
+  const box = document.getElementById("globeBox");
+  if (!box) return;
+  const show = d => d && d.bins ? drawGlobe(box, d, job) : (box.textContent = (d && d.error) || "no orientation data");
+  if (ORIENT[job] && cls === null) show(ORIENT[job]);
+  else if (INTERACTIVE) {
+    fetch("/orientation?job=" + encodeURIComponent(job) + (cls ? "&cls=" + cls : "")).then(r => r.json()).then(show).catch(() => { box.textContent = "could not load"; });
+  } else box.textContent = "Open this project with `reliontree watch` to see the orientation globe.";
+}
+function drawGlobe(box, data, job) {
+  const SIZE = 280, R = 118, C = SIZE / 2, dpr = window.devicePixelRatio || 1;
+  box.className = ""; box.innerHTML = "";
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE * dpr; canvas.height = SIZE * dpr; canvas.style.width = SIZE + "px"; canvas.style.height = SIZE + "px";
+  box.appendChild(canvas);
+  const bar = document.createElement("div"); bar.className = "globe-bar";
+  if (data.classes.length > 1) {
+    const sel = document.createElement("select");
+    data.classes.forEach(c => { const o = document.createElement("option"); o.value = c; o.textContent = "class " + c; o.selected = c === data.class; sel.appendChild(o); });
+    sel.onchange = () => loadGlobe(job, +sel.value);
+    bar.appendChild(sel);
+  }
+  bar.insertAdjacentHTML("beforeend", "<span>few</span><span class=legend></span><span>many particles</span>");
+  box.appendChild(bar);
+  box.insertAdjacentHTML("beforeend", "<p class=note style='text-align:center;margin:4px 0'>" + data.bins.length +
+    " directions with particles &middot; grey = none &middot; faint = far side &middot; drag to rotate &middot; axes x red, y green, z blue</p>");
+  const ctx = canvas.getContext("2d");
+  let yaw = 0.6, pitch = -0.5;
+  const rot = (x, y, z) => {                          // spin about z (yaw), then tilt about x (pitch)
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const x1 = cy * x - sy * y, y1 = sy * x + cy * y;
+    return [x1, cp * y1 - sp * z, sp * y1 + cp * z];  // [screen x, depth (towards viewer is -y... use y as depth), screen y]
+  };
+  const toScreen = (x, y, z) => { const [a, d, b] = rot(x, y, z); return [C + R * a, C - R * b, d]; };  // d < 0: facing the viewer
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    const g = ctx.createRadialGradient(C - 30, C - 40, 10, C, C, R);
+    g.addColorStop(0, "#f1f3f6"); g.addColorStop(1, "#d5d9e0");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(C, C, R, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = "rgba(90,100,120,.28)"; ctx.lineWidth = 1;
+    const line = pts => { let on = false; ctx.beginPath(); for (const p of pts) { const [sx, sy, d] = toScreen(...p); if (d < 0) { on ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); on = true; } else on = false; } ctx.stroke(); };
+    const ring = f => Array.from({length: 73}, (_, i) => f(i / 72 * 2 * Math.PI));
+    line(ring(t => [Math.cos(t), Math.sin(t), 0]));                                           // equator
+    for (let k = 0; k < 6; k++) line(ring(t => [Math.cos(t) * Math.cos(k * Math.PI / 6), Math.cos(t) * Math.sin(k * Math.PI / 6), Math.sin(t)]));  // meridians
+    const N = data.bins.length, rr = R * Math.sqrt(3.2 / N);
+    const pts = data.bins.map(([x, y, z, w]) => { const [sx, sy, d] = toScreen(x, y, z); return [d, sx, sy, w]; });
+    pts.sort((a, b) => b[0] - a[0]);                                                          // far side first
+    for (const [d, sx, sy, w] of pts) {                                                       // d > 0: on the far side, shown faintly
+      ctx.fillStyle = heat(w);
+      ctx.globalAlpha = d < 0 ? 0.55 + 0.45 * (-d) : 0.16;
+      ctx.beginPath(); ctx.arc(sx, sy, d < 0 ? rr * (0.6 + 0.4 * (-d)) : rr * 0.55, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const [axis, color, name] of [[[1, 0, 0], "#d33", "x"], [[0, 1, 0], "#2a2", "y"], [[0, 0, 1], "#36d", "z"]]) {
+      const [sx, sy, d] = toScreen(...axis.map(v => v * 1.18));
+      ctx.strokeStyle = color; ctx.fillStyle = color; ctx.globalAlpha = d < 0 ? 1 : 0.35; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(C, C); ctx.lineTo(sx, sy); ctx.stroke(); ctx.font = "bold 12px sans-serif"; ctx.fillText(name, sx + 3, sy - 3);
+    }
+    ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(90,100,120,.6)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(C, C, R, 0, 2 * Math.PI); ctx.stroke();
+  }
+  let drag = null;
+  canvas.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointermove", e => {
+    if (!drag) return;
+    yaw += (e.clientX - drag[0]) * 0.012; pitch = Math.max(-1.55, Math.min(1.55, pitch + (e.clientY - drag[1]) * 0.012));
+    drag = [e.clientX, e.clientY]; render();
+  });
+  canvas.addEventListener("pointerup", () => { drag = null; });
+  render();
 }
 """
