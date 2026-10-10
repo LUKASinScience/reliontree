@@ -15,8 +15,8 @@ Select/job002/       None relion.select.interactive  Running
 
 def test_alias_and_status(tmp_path):
     (tmp_path / "default_pipeline.star").write_text(PIPE)
-    assert load_meta(tmp_path) == {"Class3D/job001": {"alias": "remove_junk_1", "status": "succeeded"},
-                                   "Select/job002": {"alias": "", "status": "running"}}
+    assert load_meta(tmp_path) == {"Class3D/job001": {"alias": "remove_junk_1", "status": "succeeded", "type": "relion.class3d"},
+                                   "Select/job002": {"alias": "", "status": "running", "type": "relion.select.interactive"}}
 
 
 def test_notes_drop_command_log(tmp_path):
@@ -142,3 +142,34 @@ def test_relion3_pipeline_with_numeric_type_and_status_columns(tmp_path):
     assert set(t["artifacts"]) == {"Class2D/job008", "Select/job009"}
     assert t["alias"]["Class2D/job008"] == "LoG"
     assert {j: a["state"] for j, a in t["artifacts"].items()} == {"Class2D/job008": "succeeded", "Select/job009": "failed"}
+
+
+def _pipeline(tmp_path, rows):
+    star = ('data_pipeline_processes\n\nloop_\n_rlnPipeLineProcessName #1\n_rlnPipeLineProcessAlias #2\n'
+            '_rlnPipeLineProcessTypeLabel #3\n_rlnPipeLineProcessStatusLabel #4\n' + "".join("%s/ None %s Succeeded\n" % r for r in rows))
+    (tmp_path / "default_pipeline.star").write_text(star)
+    for name, _ in rows:
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+
+
+def test_project_type_is_detected_from_the_pipeline_and_job_star(tmp_path):
+    from reliontree.relion_treebuild import build_tree
+    sta, spa, mixed_flag, empty = tmp_path / "sta", tmp_path / "spa", tmp_path / "flag", tmp_path / "empty"
+    for d in (sta, spa, mixed_flag, empty):
+        d.mkdir()
+    _pipeline(sta, [("Import/job001", "relion.importtomo"), ("Refine3D/job002", "relion.refine3d.tomo")])
+    _pipeline(spa, [("MotionCorr/job001", "relion.motioncorr.own"), ("Class2D/job002", "relion.class2d")])
+    _pipeline(mixed_flag, [("Class3D/job001", "relion.class3d")])          # only job.star says tomography
+    (mixed_flag / "Class3D/job001/job.star").write_text("data_job\n\n_rlnJobTypeLabel relion.class3d\n_rlnJobIsTomo 1\n")
+    _pipeline(empty, [("Select/job001", "relion.select.interactive")])
+    got = {n: build_tree(d)["experiment"]["type"] for n, d in (("sta", sta), ("spa", spa), ("flag", mixed_flag), ("empty", empty))}
+    assert got == {"sta": "sta", "spa": "spa", "flag": "sta", "empty": "unknown"}
+    assert "refine3d.tomo" in build_tree(sta)["experiment"]["evidence"]
+
+
+def test_project_type_badge_is_shown_and_escaped(tmp_path):
+    from reliontree.relion_treebuild import build_tree
+    from reliontree.render_html import render_html
+    _pipeline(tmp_path, [("Refine3D/job001", "relion.refine3d.tomo")])
+    page = render_html(build_tree(tmp_path))
+    assert 'class="exp-badge"' in page and "STA · subtomogram averaging" in page and "relion.refine3d.tomo" in page

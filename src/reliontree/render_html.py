@@ -139,7 +139,7 @@ _PAGE = """<!doctype html>
   <div id="jobList"></div>
 </div>
 <div id="main">
-<h1 title="{title}">{title_short}</h1>
+<h1 title="{title}">{title_short}{experiment_badge}</h1>
 <div id="toolbar">
   <button id="viewToggle" onclick="toggleView()">&#9638; Table view</button>
   <select id="exportSel" onchange="doExport(this.value); this.value = ''" title="export the tree or the table">
@@ -828,6 +828,17 @@ _NO_BROWSE_PANEL = """<div id="browse" class="drawer">
 run <code>reliontree watch</code> instead of a static export.</p></div>"""
 
 
+_EXPERIMENT_NAMES = {"sta": "STA \u00b7 subtomogram averaging", "spa": "SPA \u00b7 single particle"}
+
+
+def _experiment_badge(experiment):
+    """Small badge next to the project name: what kind of project this is, with the evidence as tooltip."""
+    if not experiment or experiment.get("type") not in _EXPERIMENT_NAMES:
+        return ""
+    return ' <span class="exp-badge" title="detected from: %s">%s</span>' % (
+        html.escape(experiment.get("evidence", "")), _EXPERIMENT_NAMES[experiment["type"]])
+
+
 def _js(obj):
     """JSON for embedding inside a <script> block: `</script>` in a job note,
     alias or tool annotation must not be able to end the block."""
@@ -902,6 +913,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         for job in ordered_jobs(tree)
     }
     return _PAGE.format(
+        experiment_badge=_experiment_badge(tree.get("experiment")),
         title=html.escape(title), title_short=html.escape(title.rstrip("/").split("/")[-1] or title), theme_css=THEME_CSS, svg=render_svg(tree, fit=True),
         jobs_json=_js(jobs), csv_json=_js(rows_to_csv(rows)),
         browse_panel=browse_html if browse_html is not None else _NO_BROWSE_PANEL,

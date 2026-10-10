@@ -9,14 +9,14 @@ from pathlib import Path
 
 try:
     from .relion_annotations import load_annotations
-    from .relion_pipeline import load_pipeline, load_meta, build_parents, upstream, limit_hops, layers as pipeline_layers
+    from .relion_pipeline import load_pipeline, load_meta, detect_experiment, build_parents, upstream, limit_hops, layers as pipeline_layers
     from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
     from .relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 except ImportError:
     from relion_annotations import load_annotations
-    from relion_pipeline import load_pipeline, load_meta, build_parents, upstream, limit_hops, layers as pipeline_layers
+    from relion_pipeline import load_pipeline, load_meta, detect_experiment, build_parents, upstream, limit_hops, layers as pipeline_layers
     from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
     from relion_mrc_thumb import mrc_slice_thumbnail
@@ -224,6 +224,7 @@ def build_tree(project_dir, selected=None, max_hops=None):
         notes[job] = user_notes(job_dirs[job])
 
     annotations = {j: a for j, a in load_annotations(project_dir).items() if j in job_dirs}
+    experiment = detect_experiment({j: meta[j] for j in meta if j in job_dirs}, job_dirs.values())
 
     final, best, main, side = find_main_path(layered, parents, artifacts, stats)
     return {
@@ -231,7 +232,7 @@ def build_tree(project_dir, selected=None, max_hops=None):
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
         "job_dirs": job_dirs, "classes": classes,
-        "alias": alias, "notes": notes, "chips": chips, "masks": masks, "annotations": annotations,
+        "alias": alias, "notes": notes, "chips": chips, "masks": masks, "annotations": annotations, "experiment": experiment,
         "latest": final, "best": best, "main": main, "side": side,
     }
 
