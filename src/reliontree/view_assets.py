@@ -350,11 +350,48 @@ function heat(w) {
   }
   return "rgb(224,69,47)";
 }
+// The "Orientations" section of a job's panel. RELION writes no angular distribution for a classification that ran
+// without alignment (dont_skip_align = No): its particles keep the orientations of the job they came from, so we say that and
+// offer the nearest upstream job that has one, instead of silently leaving the section out.
+function orientationSource(job) {
+  // {job, cls}: the nearest upstream job with an angular distribution; when the particles came through a Select that kept
+  // exactly one class of it, that class is the one to show.
+  const seen = new Set([job]), todo = [...(JOBS[job].parents || [])];
+  while (todo.length) {
+    const n = todo.shift();
+    if (seen.has(n) || !JOBS[n]) continue;
+    seen.add(n);
+    if (JOBS[n].orient) return {job: n, cls: null};
+    const sel = JOBS[n].selection;
+    if (sel && JOBS[sel.parent] && JOBS[sel.parent].orient) {
+      const kept = sel.flags.map((f, i) => f ? i + 1 : 0).filter(Boolean);
+      return {job: sel.parent, cls: kept.length === 1 ? kept[0] : null};
+    }
+    todo.push(...JOBS[n].parents);
+  }
+  return null;
+}
+function orientationSection(job, info) {
+  if (info.orient) return "<details class=sec open><summary>Orientations</summary><div id=globeBox class=note>loading&hellip;</div></details>";
+  if (!["Class3D", "Refine3D"].includes(jobType(job)) || info.state === "missing") return "";
+  const noAlign = jobType(job) === "Class3D" && (info.options || {}).dont_skip_align === "No";
+  const why = noAlign
+    ? "This classification ran without alignment (<code>dont_skip_align = No</code>), so RELION wrote no angular distribution; its particles keep the orientations of the job they came from."
+    : "No <code>*_angdist.bild</code> found in this job (still running, or the files were removed).";
+  const src = orientationSource(job);
+  return "<details class=sec open><summary>Orientations</summary><div id=globeBox class=note" +
+    (src ? " data-src='" + esc(src.job) + "' data-cls='" + (src.cls || "") + "'" : "") + "><p style='margin:4px 0'>" + why +
+    (src ? "</p><button type=button onclick='showSourceGlobe()'>Show orientations of " + esc(src.job) + (src.cls ? " (class " + src.cls + ")" : "") + " &rarr;</button>" : "</p>") + "</div></details>";
+}
+function showSourceGlobe() {
+  const box = document.getElementById("globeBox");
+  if (box && box.dataset.src) loadGlobe(box.dataset.src, box.dataset.cls ? +box.dataset.cls : null);
+}
 function loadGlobe(job, cls) {
   const box = document.getElementById("globeBox");
   if (!box) return;
   const show = d => d && d.bins ? drawGlobe(box, d, job) : (box.textContent = (d && d.error) || "no orientation data");
-  if (ORIENT[job] && cls === null) show(ORIENT[job]);
+  if (ORIENT[job] && !cls) show(ORIENT[job]);
   else if (INTERACTIVE) {
     fetch("/orientation?job=" + encodeURIComponent(job) + (cls ? "&cls=" + cls : "")).then(r => r.json()).then(show).catch(() => { box.textContent = "could not load"; });
   } else box.textContent = "Open this project with `reliontree watch` to see the orientation globe.";
@@ -374,7 +411,7 @@ function drawGlobe(box, data, job) {
   }
   bar.insertAdjacentHTML("beforeend", "<span>few</span><span class=legend></span><span>many particles</span>");
   box.appendChild(bar);
-  box.insertAdjacentHTML("beforeend", "<p class=note style='text-align:center;margin:4px 0'>" + data.bins.length +
+  box.insertAdjacentHTML("beforeend", "<p class=note style='text-align:center;margin:4px 0'>" + esc(job) + " &middot; " + data.bins.length +
     " directions with particles &middot; grey = none &middot; faint = far side &middot; drag to rotate &middot; axes x red, y green, z blue</p>");
   const ctx = canvas.getContext("2d");
   let yaw = 0.6, pitch = -0.5;
