@@ -265,6 +265,31 @@ def _latest_model_star(job_dir):
     return best
 
 
+def _refine_particle_total(job_dir):
+    """Particle count of a gold-standard Refine3D job. RELION splits the data into two random halves and writes
+    one `*_half1_model.star` and one `*_half2_model.star` per iteration, each counting only its own half, and
+    `run_model.star` does the same -- reading a single model.star shows half the particles. Sums both halves of the
+    newest iteration that has both; None when this isn't a half-split job."""
+    pattern = re.compile(r"run_it(\d+)_half([12])_model\.star$")
+    found = {}
+    try:
+        for f in job_dir.iterdir():
+            m = pattern.fullmatch(f.name)
+            if m:
+                found.setdefault(int(m.group(1)), {})[m.group(2)] = f
+    except OSError:
+        return None
+    for it in sorted(found, reverse=True):
+        if len(found[it]) == 2:
+            try:
+                counts = [_sum_loop_column(f.read_text(encoding="utf-8", errors="ignore"), "_rlnGroupNrParticles")
+                          for f in found[it].values()]
+            except OSError:
+                return None
+            return sum(counts) if all(c is not None for c in counts) else None
+    return None
+
+
 def _runtime_seconds(job_dir):
     """Best-effort wall-clock runtime: mtime of job.star (job was set up)
     to mtime of whichever RELION_JOB_EXIT_* sentinel is present (job
@@ -319,6 +344,9 @@ def job_stats(job_dir):
             if resolution is None:
                 resolution = _find_scalar_field(text, "_rlnCurrentResolution")
             n_particles = _sum_loop_column(text, "_rlnGroupNrParticles")
+    halves = _refine_particle_total(job_dir)
+    if halves is not None:
+        n_particles = halves
 
     return {
         "resolution_angstrom": resolution,

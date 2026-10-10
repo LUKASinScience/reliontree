@@ -112,3 +112,16 @@ def test_many_class_job_card_is_capped_and_missing_jobs_are_compact(tmp_path):
     assert pick_classes(tree, "Class3D/job2") is None                  # few classes: all of them
     big = max(range(1, 201), key=lambda n: shares[n - 1])
     assert big in keep
+
+
+def test_refine3d_particle_count_adds_both_halves(tmp_path):
+    from reliontree.relion_artifacts import job_stats
+    def model(n_a, n_b):
+        return ("data_model_groups\n\nloop_\n_rlnGroupNumber #1\n_rlnGroupName #2\n_rlnGroupNrParticles #3\n"
+                "1 g1 %d\n2 g2 %d\n\ndata_model_general\n\n_rlnCurrentResolution 4.0\n" % (n_a, n_b))
+    (tmp_path / "run_model.star").write_text(model(30, 34))              # merged model: one half only
+    (tmp_path / "run_it003_half1_model.star").write_text(model(10, 20))  # older iteration, ignored
+    (tmp_path / "run_it003_half2_model.star").write_text(model(10, 20))
+    (tmp_path / "run_it004_half1_model.star").write_text(model(30, 34))
+    (tmp_path / "run_it004_half2_model.star").write_text(model(31, 33))
+    assert job_stats(tmp_path)["n_particles"] == 128                      # 64 + 64, not 64
