@@ -53,6 +53,7 @@ reliontree table . --format csv -o jobs.csv   # job table for a supplement
 reliontree methods .                          # draft methods-paragraph, one line per job
 reliontree diff --job Refine3D/job039 --job Refine3D/job042   # 2+ jobs' changed/varying options
 reliontree why --job Refine3D/job042          # parent, siblings, what changed from the parent
+reliontree analyze                            # optional: relion-origin checks -> pills on the job cards
 reliontree plan plan.json                     # dry run: new jobs as diffs against existing ones; --apply registers them as Scheduled (needs relion_pipeliner)
 reliontree overlap Class3D/job008 Class3D/job009   # particle overlap matrix between two classifications
 reliontree tree . --format html -o tree.html  # old single-file static export
@@ -121,6 +122,17 @@ zensical serve
 ```
 
 Opens `http://localhost:8000` with the built guide.
+
+## Optional companion: relion-origin
+
+reliontree works alone. If [relion-origin](https://github.com/LUKASinScience/relion-origin) is installed too, `reliontree analyze`
+runs its per-particle checks (orientation gaps on the viewing sphere, classes that mix more than chance) and the findings
+appear as pills on the job cards. relion-origin is imported by that one command only; everything else here never touches it.
+
+```bash
+pip install "git+https://github.com/LUKASinScience/relion-origin"     # numpy, pandas, starfile; brings reliontree along
+reliontree analyze /path/to/project                                    # writes <project>/.reliontree/annotations/relion-origin.json
+```
 
 ## Notes from other tools (annotations)
 

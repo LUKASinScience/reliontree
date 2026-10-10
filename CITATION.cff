@@ -16,5 +16,5 @@ authors:
 # people/entities, not tooling; noted here for provenance.
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/LUKASinScience/reliontree"
-version: 0.2.0
+version: 0.3.0
 date-released: "2026-10-10"
