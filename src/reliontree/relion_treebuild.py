@@ -8,12 +8,14 @@ import struct
 from pathlib import Path
 
 try:
+    from .relion_annotations import load_annotations
     from .relion_pipeline import load_pipeline, load_meta, build_parents, upstream, limit_hops, layers as pipeline_layers
     from .relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from .relion_tree_layout import layout_positions
     from .relion_mrc_thumb import mrc_slice_thumbnail
     from .relion_classes import class_history, class_selection, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 except ImportError:
+    from relion_annotations import load_annotations
     from relion_pipeline import load_pipeline, load_meta, build_parents, upstream, limit_hops, layers as pipeline_layers
     from relion_artifacts import scan_job_artifacts, job_stats, parse_job_options, list_class_maps, list_class_stack
     from relion_tree_layout import layout_positions
@@ -25,6 +27,9 @@ HEADER_H = 40          # colored bar + type label + job id line
 FOOTER_LINE_H = 14     # each of the state / stats text lines below the grid
 DETAILS_BTN_H = 20     # visible "Details" button strip at the bottom of every card
 PADDING_BOTTOM = 6
+ANNO_H = 18            # row of annotation pills (notes from relion-origin / relion-copilot ...)
+ANNO_COLORS = {"bad": "#c62828", "warn": "#e65100", "info": "#546e7a", "good": "#2e7d32"}
+MAX_ANNO_PILLS = 2
 BADGE_H = 18           # row of 'latest result' / 'best resolution' pills under the header
 ROW_GAP = 20
 CHIP_H = 34            # row of small mask chips (thumbnail + id) at the bottom of a consumer card
@@ -200,13 +205,15 @@ def build_tree(project_dir, selected=None, max_hops=None):
             st["state"] = meta[job]["status"]
         notes[job] = user_notes(job_dirs[job])
 
+    annotations = {j: a for j, a in load_annotations(project_dir).items() if j in job_dirs}
+
     final, best, main, side = find_main_path(layered, parents, artifacts, stats)
     return {
         "selection": selection, "chosen": chosen,
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
         "job_dirs": job_dirs, "classes": classes,
-        "alias": alias, "notes": notes, "chips": chips, "masks": masks,
+        "alias": alias, "notes": notes, "chips": chips, "masks": masks, "annotations": annotations,
         "latest": final, "best": best, "main": main, "side": side,
     }
 
@@ -331,14 +338,15 @@ def _card_layout(tree, job, thumbs):
         badges.append(("\u2605 best resolution", "#2e7d32"))
     badge_h = BADGE_H if badges else 0
     chip_h = CHIP_H if tree.get("chips", {}).get(job) else 0
+    anno_h = ANNO_H if tree.get("annotations", {}).get(job) else 0
 
     conv = _convergence(tree, job)
-    height = (HEADER_H + badge_h + chip_h + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
+    height = (HEADER_H + badge_h + anno_h + chip_h + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
               (CONV_H if conv else 0) + PADDING_BOTTOM + DETAILS_BTN_H)
     return {
         "label2": label2, "conv": conv, "cols": cols, "thumb_size": thumb_size,
         "grid_w": grid_w, "grid_h": grid_h, "height": height,
-        "badges": badges, "badge_h": badge_h, "chip_h": chip_h,
+        "badges": badges, "badge_h": badge_h, "anno_h": anno_h, "chip_h": chip_h,
     }
 
 
@@ -489,13 +497,32 @@ def render_svg(tree, fit=False):
                           '<text x="%.1f" y="%.1f" fill="#fff" font-size="10" font-weight="bold">%s</text>' %
                           (bx, y + HEADER_H + 2, len(label) * 6 + 12, color, bx + 6, y + HEADER_H + 12.5, _esc(label)))
 
-        text_y = y + HEADER_H + lay["badge_h"] + 8
+        top = lay["badge_h"] + lay["anno_h"]
+        anns = tree.get("annotations", {}).get(job, [])
+        ax = x + 8
+        shown = 0
+        for a in anns[:MAX_ANNO_PILLS]:
+            label = a["label"] if len(a["label"]) <= 22 else a["label"][:21] + "\u2026"
+            w = len(label) * 5.6 + 12
+            if shown and ax + w > x + CARD_W - 30:   # would run past the card edge: leave it to the "+N"
+                break
+            parts.append('<g class="anno"><title>%s</title><rect x="%.1f" y="%.1f" width="%.1f" height="14" rx="7" fill="%s"/>'
+                         '<text x="%.1f" y="%.1f" fill="#fff" font-size="10">%s</text></g>' %
+                         (_esc("%s: %s%s" % (a["source"], a["label"], " \u2014 " + a["detail"] if a["detail"] else "")),
+                          ax, y + HEADER_H + lay["badge_h"] + 2, w, ANNO_COLORS[a["level"]],
+                          ax + 6, y + HEADER_H + lay["badge_h"] + 12.5, _esc(label)))
+            ax += w + 4
+            shown += 1
+        if len(anns) > shown:
+            parts.append('<text x="%.1f" y="%.1f" font-size="10" fill="#666">+%d</text>' %
+                         (ax, y + HEADER_H + lay["badge_h"] + 12.5, len(anns) - shown))
+        text_y = y + HEADER_H + top + 8
         job_thumbs = thumbs[job]
         if job_thumbs:
             cols = lay["cols"]
             size = lay["thumb_size"]
             grid_x = x + (CARD_W - lay["grid_w"]) / 2
-            grid_y = y + HEADER_H + lay["badge_h"]
+            grid_y = y + HEADER_H + top
             for i, (num, uri) in enumerate(job_thumbs):
                 col, row = i % cols, i // cols
                 ix = grid_x + col * (size + GRID_GAP)

@@ -111,6 +111,24 @@ zensical serve
 
 Opens `http://localhost:8000` with the built guide.
 
+## Notes from other tools (annotations)
+
+Other tools can attach short notes to jobs, shown as coloured pills on the job
+card, a ⚑ in the sidebar and a "Notes from tools" section in the job panel.
+The contract is only a file, so reliontree stays dependency-free and any tool
+can write it:
+
+```
+<project>/.reliontree/annotations/<tool>.json
+{"Class3D/job004": [{"label": "clustered views: C2", "level": "warn", "detail": "..."}]}
+```
+
+`level` is `good`, `warn`, `bad` or `info`. One file per tool, so writers never
+overwrite each other; malformed entries are ignored and text is length-capped.
+[relion-origin](https://github.com/LUKASinScience/relion-origin) writes QC
+signals (`relion-origin-annotate`), relion-copilot writes its next-step
+proposals (`relion-copilot-annotate`).
+
 ## How reliontree fits alongside other RELION tools
 
 Follow_Relion_gracefully and CNIO_Relion_Tools are Streamlit/Dash apps —
