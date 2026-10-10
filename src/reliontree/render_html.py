@@ -715,7 +715,7 @@ function selectJob(job) {{
     (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
       "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
     "<div class=chips>" + chips.join("") + "</div>" +
-    (info.orient ? "<details class=sec open><summary>Orientations</summary><div id=globeBox class=note>loading&hellip;</div></details>" : "") +
+    orientationSection(job, info) +
     (info.annotations.length ? "<details class=sec open><summary>Notes from tools</summary>" + info.annotations.map(a =>
       "<p style='margin:6px 0'><span class='lvl-dot lvl-" + a.level + "'></span><b>" + esc(a.label) + "</b> <span class=note>" + esc(a.source) + "</span>" +
       (a.detail ? "<br><span style='font-size:12px'>" + esc(a.detail) + "</span>" : "") + "</p>").join("") + "</details>" : "") +
