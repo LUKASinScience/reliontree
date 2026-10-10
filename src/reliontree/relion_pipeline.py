@@ -88,6 +88,29 @@ def load_pipeline(project):
     return procs, node_to_prod, proc_to_in
 
 
+_PIPELINE_STATUS = {"succeeded": "succeeded", "failed": "failed", "running": "running",
+                    "aborted": "aborted", "scheduled": "scheduled"}
+
+
+def load_meta(project):
+    """{job: {"alias": str, "status": str}} from default_pipeline.star's
+    process table: RELION's own alias (e.g. `remove_junk_1`) and status
+    label. Jobs only referenced from per-job pipeline files are absent."""
+    try:
+        text = (Path(project) / "default_pipeline.star").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}
+    meta = {}
+    for row in parse_pipeline_star(text)["processes"]:
+        name = row.get("_rlnPipeLineProcessName", "").strip().rstrip("/")
+        alias = row.get("_rlnPipeLineProcessAlias", "").strip().rstrip("/")
+        alias = "" if alias in ("", "None") else alias.split("/")[-1]
+        status = _PIPELINE_STATUS.get(row.get("_rlnPipeLineProcessStatusLabel", "").strip().lower(), "")
+        if name:
+            meta[name] = {"alias": alias, "status": status}
+    return meta
+
+
 def build_parents(procs, node_to_prod, proc_to_in):
     parents = {p: set() for p in procs}
     for proc in procs:
