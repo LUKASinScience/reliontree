@@ -6,6 +6,7 @@ jobs (`class_overlap`, reads the big `*_data.star`, so only on demand).
 Pure stdlib."""
 
 import re
+import struct
 
 try:
     from .relion_artifacts import _find_scalar_field, _loop_column_values
@@ -63,16 +64,30 @@ def class_selection(job_dir, n_classes):
     return flags if len(flags) == n_classes else None
 
 
-def class_iter_thumbs(job_dir, iteration, size=72):
+def _mrc_nz(path):
+    try:
+        with open(path, "rb") as f:
+            return struct.unpack("<3i", f.read(12))[2]
+    except (OSError, struct.error):
+        return 0
+
+
+def class_iter_thumbs(job_dir, iteration, size=72, only=None):
     """[data-URI, ...] one class-average thumbnail per class at the given
     iteration (3D: run_itNNN_classMMM.mrc volumes' middle slice; 2D: the
-    slices of run_itNNN_classes.mrcs). [] if that iteration has no maps."""
+    slices of run_itNNN_classes.mrcs). [] if that iteration has no maps.
+    `only`: set of 1-based class numbers to decode; the others stay in the
+    list as None (index = class number - 1), so a 200-class Class2D job does
+    not decode 200 images nobody will look at."""
     try:
         from .relion_mrc_thumb import mrc_slice_thumbnail
     except ImportError:
         from relion_mrc_thumb import mrc_slice_thumbnail
+    wanted = lambda n: only is None or n in only
     stack = job_dir / ("run_it%03d_classes.mrcs" % iteration)
     if stack.is_file():
+        if only is not None:
+            return [mrc_slice_thumbnail(stack, size=size, z=z) if wanted(z + 1) else None for z in range(_mrc_nz(stack))]
         out, z = [], 0
         while True:
             uri = mrc_slice_thumbnail(stack, size=size, z=z)
@@ -85,7 +100,7 @@ def class_iter_thumbs(job_dir, iteration, size=72):
         path = job_dir / ("run_it%03d_class%03d.mrc" % (iteration, n))
         if not path.is_file():
             break
-        out.append(mrc_slice_thumbnail(path, size=size))
+        out.append(mrc_slice_thumbnail(path, size=size) if wanted(n) else None)
     return out
 
 

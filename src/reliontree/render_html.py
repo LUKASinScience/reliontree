@@ -6,7 +6,7 @@ import html
 import json
 
 from .view_assets import VIEW_CSS, VIEW_JS
-from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
+from .relion_treebuild import pick_classes, render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
 from .theme import THEME_CSS
@@ -445,13 +445,32 @@ function renderTableView() {{
   }}
 }}
 
+// Jobs whose folder is gone (trimmed or deposited projects) are hidden in the list until asked for.
+let showMissing = false;
+try {{ showMissing = sessionStorage.getItem("reliontree.showMissing") === "1"; }} catch (e) {{}}
+function toggleMissing() {{
+  showMissing = !showMissing;
+  try {{ sessionStorage.setItem("reliontree.showMissing", showMissing ? "1" : "0"); }} catch (e) {{}}
+  renderJobList(document.getElementById("jobFilter").value);
+}}
+
 function renderJobList(filter) {{
   const list = document.getElementById("jobList");
   const typeFilter = document.getElementById("typeFilter").value;
   const stateFilter = document.getElementById("stateFilter").value;
   const convFilter = document.getElementById("convFilter").value;
   list.innerHTML = "";
+  const nMissing = Object.keys(JOBS).filter(j => JOBS[j].state === "missing").length;
+  const missingVisible = showMissing || stateFilter === "missing";
+  if (nMissing && stateFilter !== "missing") {{
+    const row = document.createElement("div");
+    row.className = "missing-toggle";
+    row.textContent = (showMissing ? "\u25be hide " : "\u25b8 show ") + nMissing + " missing jobs (folder not on disk)";
+    row.onclick = toggleMissing;
+    list.appendChild(row);
+  }}
   for (const job of Object.keys(JOBS)) {{
+    if (JOBS[job].state === "missing" && !missingVisible) continue;
     if (filter && (job + " " + JOBS[job].alias + " " + JOBS[job].notes + " " + JOBS[job].state + " " + JOBS[job].annotations.map(a => a.label).join(" ")).toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
     if (typeFilter && jobType(job) !== typeFilter) continue;
     if (stateFilter && JOBS[job].state !== stateFilter) continue;
@@ -872,7 +891,8 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "chosen": tree["chosen"].get(job, {}),
             "advice": class_advice(tree["classes"].get(job, [])),
             "class_thumbs": [] if interactive else (
-                class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80)
+                class_iter_thumbs(tree["job_dirs"][thumb_job], tree["classes"][thumb_job][-1]["iter"], 80,
+                                  only=pick_classes(tree, thumb_job))
                 if tree["classes"].get(thumb_job) else []),
             "classes": tree["classes"].get(job, []),
         }
