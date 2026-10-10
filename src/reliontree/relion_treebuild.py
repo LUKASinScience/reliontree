@@ -36,6 +36,7 @@ CHIP_H = 34            # row of small mask chips (thumbnail + id) at the bottom 
 CHIP_W = 58
 CHIP_THUMB = 24
 MAX_CHIPS = 3
+MAX_CLASS_THUMBS = 12     # a 200-class Class2D job must not become a 4000 px tall card
 CONV_H = 36            # convergence sparkline strip on Class2D/Class3D cards
 TINY_CLASS_SHARE = TINY_SHARE      # a class below this share is dimmed: almost certainly an empty/junk class
 CONV_SETTLED = SETTLED_CHANGES     # dashed "settled" level
@@ -117,10 +118,27 @@ def _job_maps(job_dir, artifacts):
     return []
 
 
-def _job_thumbnails(job_dir, artifacts):
+def pick_classes(tree, job, limit=MAX_CLASS_THUMBS):
+    """Class numbers worth a thumbnail on `job`'s card: None (= all) when it has at most `limit` classes, else the
+    classes a Select job kept first, then the largest ones -- what you would look at in a 200-class Class2D job."""
+    hist = tree.get("classes", {}).get(job) or []
+    shares = hist[-1]["shares"] if hist else []
+    if len(shares) <= limit:
+        return None
+    keep = set(tree.get("chosen", {}).get(job, {}))
+    for number in sorted(range(1, len(shares) + 1), key=lambda n: -shares[n - 1]):
+        if len(keep) >= limit:
+            break
+        keep.add(number)
+    return keep
+
+
+def _job_thumbnails(job_dir, artifacts, keep=None):
     """[(class_number_or_None, data_uri), ...], skipping any map that
-    fails to decode (unsupported MRC mode, truncated file, ...)."""
+    fails to decode (unsupported MRC mode, truncated file, ...). `keep`: only these class numbers."""
     maps = _job_maps(job_dir, artifacts)
+    if keep is not None:
+        maps = [(n, p) for n, p in maps if n in keep]
     size = GRID_THUMB_SIZE if len(maps) > 1 else SINGLE_THUMB_SIZE
     out = []
     for num, path in maps:
@@ -201,8 +219,8 @@ def build_tree(project_dir, selected=None, max_hops=None):
         st = artifacts[job]
         if not job_dirs[job].is_dir():
             st["state"] = "missing"
-        elif st["state"] == "unknown" and meta.get(job, {}).get("status"):
-            st["state"] = meta[job]["status"]
+        elif not st.get("state_from_marker") and meta.get(job, {}).get("status"):
+            st["state"] = meta[job]["status"]   # RELION's own status label beats the run.out guess (and fills "unknown")
         notes[job] = user_notes(job_dirs[job])
 
     annotations = {j: a for j, a in load_annotations(project_dir).items() if j in job_dirs}
@@ -316,9 +334,12 @@ def _card_layout(tree, job, thumbs):
     hist = tree.get("classes", {}).get(sel["parent"]) if sel else None
     if sel and hist:
         kept = [i for i, f in enumerate(sel["flags"]) if f and i < len(hist[-1]["shares"])]
-        label2.insert(0, "kept " + ", ".join("C%d" % (i + 1) for i in kept) +
-                      " (%.0f%%)" % (100 * sum(hist[-1]["shares"][i] for i in kept)))
+        names = ", ".join("C%d" % (i + 1) for i in kept) if len(kept) <= 4 else "%d of %d classes" % (len(kept), len(hist[-1]["shares"]))
+        label2.insert(0, "kept %s (%.0f%%)" % (names, 100 * sum(hist[-1]["shares"][i] for i in kept)))
 
+    shares = (tree.get("classes", {}).get(job) or [{"shares": []}])[-1]["shares"]
+    if thumbs and len(shares) > len(thumbs) > 1:
+        label2.append("%d of %d classes" % (len(thumbs), len(shares)))
     n = len(thumbs)
     if n == 0:
         cols = 0
@@ -341,12 +362,13 @@ def _card_layout(tree, job, thumbs):
     anno_h = ANNO_H if tree.get("annotations", {}).get(job) else 0
 
     conv = _convergence(tree, job)
+    compact = tree["artifacts"].get(job, {}).get("state") == "missing"   # nothing on disk to show
     height = (HEADER_H + badge_h + anno_h + chip_h + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
-              (CONV_H if conv else 0) + PADDING_BOTTOM + DETAILS_BTN_H)
+              (CONV_H if conv else 0) + PADDING_BOTTOM + (0 if compact else DETAILS_BTN_H))
     return {
         "label2": label2, "conv": conv, "cols": cols, "thumb_size": thumb_size,
         "grid_w": grid_w, "grid_h": grid_h, "height": height,
-        "badges": badges, "badge_h": badge_h, "anno_h": anno_h, "chip_h": chip_h,
+        "badges": badges, "badge_h": badge_h, "anno_h": anno_h, "chip_h": chip_h, "compact": compact,
     }
 
 
@@ -404,7 +426,7 @@ def render_svg(tree, fit=False):
     for headless/terminal use."""
     jobs = [j for layer in tree["layers"] for j in layer]  # masks are chips, not cards
     thumbs = {
-        j: _job_thumbnails(tree["job_dirs"][j], tree["artifacts"].get(j, {}))
+        j: _job_thumbnails(tree["job_dirs"][j], tree["artifacts"].get(j, {}), pick_classes(tree, j))
         for j in jobs
     }
     for j in tree.get("selection", {}):  # Select: no thumbs, the parent card already shows the kept classes
@@ -576,18 +598,19 @@ def render_svg(tree, fit=False):
             parts.append('<text x="%.1f" y="%.1f" font-size="10" fill="#666">+%d</text>' %
                          (x + 8 + MAX_CHIPS * (CHIP_W + 4), y + h - DETAILS_BTN_H - 13, len(chip_list) - MAX_CHIPS))
 
-        # A visibly clickable "Details" strip at the bottom of every card —
-        # clicking anywhere on the card already opened the detail panel,
-        # but nothing on the card looked clickable, so it went unnoticed.
-        btn_y = y + h - DETAILS_BTN_H
-        parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="0" '
-                      'fill="%s" fill-opacity="0.08"/>' % (x, btn_y, CARD_W, DETAILS_BTN_H, type_color))
-        parts.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#eee"/>' %
-                      (x, btn_y, x + CARD_W, btn_y))
-        parts.append('<text x="%.1f" y="%.1f" fill="%s" font-weight="bold" '
-                      'text-anchor="middle">%s &#8250;</text>' %
-                      (x + CARD_W / 2, btn_y + 14, type_color,
-                       "Classes &amp; details" if lay["conv"] or job in tree.get("selection", {}) else "Details"))
+        if not lay["compact"]:
+            # A visibly clickable "Details" strip at the bottom of every card —
+            # clicking anywhere on the card already opened the detail panel,
+            # but nothing on the card looked clickable, so it went unnoticed.
+            btn_y = y + h - DETAILS_BTN_H
+            parts.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="0" '
+                          'fill="%s" fill-opacity="0.08"/>' % (x, btn_y, CARD_W, DETAILS_BTN_H, type_color))
+            parts.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#eee"/>' %
+                          (x, btn_y, x + CARD_W, btn_y))
+            parts.append('<text x="%.1f" y="%.1f" fill="%s" font-weight="bold" '
+                          'text-anchor="middle">%s &#8250;</text>' %
+                          (x + CARD_W / 2, btn_y + 14, type_color,
+                           "Classes &amp; details" if lay["conv"] or job in tree.get("selection", {}) else "Details"))
         parts.append('</g>')
 
     parts.append("</svg>")
