@@ -120,14 +120,15 @@ can write it:
 
 ```
 <project>/.reliontree/annotations/<tool>.json
-{"Class3D/job004": [{"label": "clustered views: C2", "level": "warn", "detail": "..."}]}
+{"Class3D/job004": [{"label": "views: 52% of sphere sparse", "level": "warn", "detail": "..."}]}
 ```
 
 `level` is `good`, `warn`, `bad` or `info`. One file per tool, so writers never
 overwrite each other; malformed entries are ignored and text is length-capped.
-[relion-origin](https://github.com/LUKASinScience/relion-origin) writes QC
-signals (`relion-origin-annotate`), relion-copilot writes its next-step
-proposals (`relion-copilot-annotate`).
+Any script can write such a file. Two companion tools of the same author do (relion-origin: per-particle QC and
+orientation gaps; relion-copilot: next-step proposals); they are not public yet. reliontree does not need them:
+it has no dependencies, never imports them, and shows what it finds on its own (project type, orientation globe)
+without them.
 
 ## How reliontree fits alongside other RELION tools
 

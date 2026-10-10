@@ -6,6 +6,7 @@ import html
 import json
 
 from .view_assets import VIEW_CSS, VIEW_JS
+from .relion_orientation import has_orientation, job_orientation
 from .relion_treebuild import pick_classes, render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
@@ -182,6 +183,7 @@ const JOBS = {jobs_json};
 const CSV_TEXT = {csv_json};
 const INTERACTIVE = {interactive_json};
 const TYPE_COLORS = {type_colors_json};
+const ORIENT = {orient_json};
 
 function download(filename, text, mime) {{
   const blob = new Blob([text], {{type: mime}});
@@ -713,6 +715,7 @@ function selectJob(job) {{
     (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
       "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
     "<div class=chips>" + chips.join("") + "</div>" +
+    (info.orient ? "<details class=sec open><summary>Orientations</summary><div id=globeBox class=note>loading&hellip;</div></details>" : "") +
     (info.annotations.length ? "<details class=sec open><summary>Notes from tools</summary>" + info.annotations.map(a =>
       "<p style='margin:6px 0'><span class='lvl-dot lvl-" + a.level + "'></span><b>" + esc(a.label) + "</b> <span class=note>" + esc(a.source) + "</span>" +
       (a.detail ? "<br><span style='font-size:12px'>" + esc(a.detail) + "</span>" : "") + "</p>").join("") + "</details>" : "") +
@@ -725,6 +728,7 @@ function selectJob(job) {{
   if (INTERACTIVE && info.classes && info.classes.length) setClassIter(info.classes.length - 1);
   if (INTERACTIVE && info.selection) paintSelection(info);
   openDrawer("detail");
+  if (info.orient) loadGlobe(job, null);
   centerOn(job);
 }}
 
@@ -839,6 +843,18 @@ def _experiment_badge(experiment):
         html.escape(experiment.get("evidence", "")), _EXPERIMENT_NAMES[experiment["type"]])
 
 
+def _static_orientation(tree, interactive):
+    """{job: orientation data} embedded for a static export (the live view fetches it on demand): just the final
+    refinement on the path to the latest result, so the file stays small."""
+    if interactive:
+        return {}
+    for job in sorted(tree.get("main", ()), reverse=True):
+        if job.startswith("Refine3D/") and has_orientation(tree["job_dirs"][job]):
+            data = job_orientation(tree["job_dirs"][job])
+            return {job: data} if data else {}
+    return {}
+
+
 def _js(obj):
     """JSON for embedding inside a <script> block: `</script>` in a job note,
     alias or tool annotation must not be able to end the block."""
@@ -893,6 +909,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "main": job in tree["main"], "side": job in tree["side"],
             "chips": tree["chips"].get(job, []),
             "annotations": tree.get("annotations", {}).get(job, []),
+            "orient": has_orientation(tree["job_dirs"][job]),
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "n_particles": stats.get("n_particles"),
             "runtime_seconds": stats.get("runtime_seconds"),
@@ -914,6 +931,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     }
     return _PAGE.format(
         experiment_badge=_experiment_badge(tree.get("experiment")),
+        orient_json=_js(_static_orientation(tree, interactive)),
         title=html.escape(title), title_short=html.escape(title.rstrip("/").split("/")[-1] or title), theme_css=THEME_CSS, svg=render_svg(tree, fit=True),
         jobs_json=_js(jobs), csv_json=_js(rows_to_csv(rows)),
         browse_panel=browse_html if browse_html is not None else _NO_BROWSE_PANEL,
