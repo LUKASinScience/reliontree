@@ -6,8 +6,10 @@ from pathlib import Path
 
 def parse_pipeline_star(text):
     """Extract process and edge tables from a pipeline STAR file."""
-    need_proc  = {"_rlnPipeLineProcessName", "_rlnPipeLineProcessTypeLabel",
-                  "_rlnPipeLineProcessStatusLabel"}
+    # RELION >= 4 names the type/status columns `...TypeLabel` / `...StatusLabel` (text); RELION 3.x wrote
+    # `...Type` / `...Status` as numbers. Both describe the same table.
+    need_proc  = ({"_rlnPipeLineProcessName", "_rlnPipeLineProcessTypeLabel", "_rlnPipeLineProcessStatusLabel"},
+                  {"_rlnPipeLineProcessName", "_rlnPipeLineProcessType", "_rlnPipeLineProcessStatus"})
     need_efrom = {"_rlnPipeLineEdgeFromNode", "_rlnPipeLineEdgeProcess"}
     need_eto   = {"_rlnPipeLineEdgeProcess",  "_rlnPipeLineEdgeToNode"}
     out = {"processes": [], "e_from": [], "e_to": []}
@@ -33,7 +35,7 @@ def parse_pipeline_star(text):
                 i += 1
             cset = set(cols)
             make = lambda: [dict(zip(cols, r)) for r in rows]
-            if need_proc.issubset(cset):  out["processes"].extend(make())
+            if any(n.issubset(cset) for n in need_proc):  out["processes"].extend(make())
             elif need_efrom.issubset(cset): out["e_from"].extend(make())
             elif need_eto.issubset(cset):   out["e_to"].extend(make())
             continue
@@ -88,6 +90,7 @@ def load_pipeline(project):
     return procs, node_to_prod, proc_to_in
 
 
+_PIPELINE_STATUS_CODE = {"0": "running", "1": "scheduled", "2": "succeeded", "3": "failed", "4": "aborted"}   # RELION 3.x
 _PIPELINE_STATUS = {"succeeded": "succeeded", "failed": "failed", "running": "running",
                     "aborted": "aborted", "scheduled": "scheduled"}
 
@@ -105,7 +108,8 @@ def load_meta(project):
         name = row.get("_rlnPipeLineProcessName", "").strip().rstrip("/")
         alias = row.get("_rlnPipeLineProcessAlias", "").strip().rstrip("/")
         alias = "" if alias in ("", "None") else alias.split("/")[-1]
-        status = _PIPELINE_STATUS.get(row.get("_rlnPipeLineProcessStatusLabel", "").strip().lower(), "")
+        label = row.get("_rlnPipeLineProcessStatusLabel", "").strip().lower()
+        status = _PIPELINE_STATUS.get(label) or _PIPELINE_STATUS_CODE.get(row.get("_rlnPipeLineProcessStatus", "").strip(), "")
         if name:
             meta[name] = {"alias": alias, "status": status}
     return meta

@@ -126,3 +126,19 @@ def test_refine3d_reports_one_half_and_exposes_the_total(tmp_path):
     (tmp_path / "run_it004_half2_model.star").write_text(model(31, 33))
     stats = job_stats(tmp_path)
     assert stats["n_particles"] == 64 and stats["n_particles_total"] == 128   # shown: one half (half-map convention); total kept for consumers
+
+
+def test_relion3_pipeline_with_numeric_type_and_status_columns(tmp_path):
+    """RELION 3.x wrote _rlnPipeLineProcessType/Status as numbers; the project showed zero jobs."""
+    from reliontree.relion_treebuild import build_tree
+    star = ('data_pipeline_processes\n\nloop_ \n_rlnPipeLineProcessName #1 \n_rlnPipeLineProcessAlias #2 \n'
+            '_rlnPipeLineProcessType #3 \n_rlnPipeLineProcessStatus #4 \n'
+            'Class2D/job008/ Class2D/LoG/ 8 2 \nSelect/job009/ None 7 3 \n')
+    (tmp_path / "default_pipeline.star").write_text(star)
+    for j in ("Class2D/job008", "Select/job009"):
+        (tmp_path / j).mkdir(parents=True)
+        (tmp_path / j / "run.out").write_text("")
+    t = build_tree(tmp_path)
+    assert set(t["artifacts"]) == {"Class2D/job008", "Select/job009"}
+    assert t["alias"]["Class2D/job008"] == "LoG"
+    assert {j: a["state"] for j, a in t["artifacts"].items()} == {"Class2D/job008": "succeeded", "Select/job009": "failed"}
