@@ -72,6 +72,17 @@ overlap heatmap between them. The sidebar can filter on convergence. The
 overlap heatmap and the iteration slider need `reliontree watch` (they load
 data on demand); a static `--format html` export shows the final iteration.
 
+More in the live view:
+
+- **Project type** (STA or SPA) is detected from the pipeline and `job.star` and shown next to the project name.
+- **Aliases and notes**: RELION aliases are the card titles; notes typed into a job's `note.txt` appear in its panel.
+  Jobs whose folder is missing (trimmed or deposited projects) are drawn compactly and hidden in the sidebar list.
+- **Paths**: pick a result (A/B buttons, "Path to…", "★ Latest") to highlight how you got there, compare two paths,
+  or show only the selection; pan and zoom with wheel/drag, 100% and Overview buttons.
+- **Orientation globe**: the job panel of a Class3D/Refine3D job shows where the particles look from, read from RELION's own
+  `*_angdist.bild` (no extra dependency): heat = how many particles, grey = no particles. Drag to rotate; a static
+  export embeds the globe of the final refinement only.
+
 Exit codes for the `tree`/`table`/`methods`/`diff`/`why` subcommands (for scripting):
 `0` ok, `1` no RELION project found, `2`
 parse/job-lookup error.
