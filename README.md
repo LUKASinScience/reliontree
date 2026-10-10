@@ -22,8 +22,10 @@ Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.
 Works on a workstation, an HPC login node (no X11, no root),
 or a cloud VM, with the same single command.
 
+reliontree is not on PyPI yet, so install it straight from GitHub:
+
 ```bash
-uvx reliontree
+uvx --from git+https://github.com/LUKASinScience/reliontree reliontree     # isolated environment, nothing left behind
 ```
 
 Run from inside (or under) a RELION project directory. Zero arguments:
@@ -34,8 +36,9 @@ directory picker if no project is found yet. No project directory handy?
 browser (a login node), use `reliontree tree --format html -o tree.html`
 for the old single-file static export instead.
 
-No `uv`? `pipx run reliontree` works the same way. Want it installed
-persistently in an existing env: `pip install reliontree`.
+No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree reliontree` works the same way.
+Want it installed persistently in an existing env:
+`pip install "git+https://github.com/LUKASinScience/reliontree"` (Python 3.9 or newer, no further dependencies).
 
 ![reliontree — job tree view](docs/assets/screenshot-tree.png)
 
@@ -199,8 +202,9 @@ diff = reliontree.diff_options(tree["options"]["Refine3D/job039"], tree["options
 context = reliontree.job_context(tree, "Refine3D/job042")
 ```
 
-`tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,
-`job_dirs`) — no custom classes to learn.
+`tree` is a plain dict — no custom classes to learn. The core keys are `layers`, `parents`, `artifacts`, `stats`, `options`
+and `job_dirs`; around them: `alias`, `notes`, `classes`, `selection`, `latest`/`best`/`main`/`side` (the path to the latest
+result), `masks`/`chips`, `annotations` and `experiment` (`{"type": "sta" | "spa" | "unknown", "evidence": ...}`).
 
 ## Origin
 
