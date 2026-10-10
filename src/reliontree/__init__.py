@@ -25,7 +25,7 @@ from .relion_methods import draft_methods_paragraph
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .render_html import render_html
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",

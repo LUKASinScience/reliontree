@@ -5,6 +5,7 @@ HTML page. No JS framework, no server required — opens directly via
 import html
 import json
 
+from .view_assets import VIEW_CSS, VIEW_JS
 from .relion_treebuild import render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_classes import class_advice, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
@@ -14,7 +15,7 @@ _PAGE = """<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>reliontree — {title}</title>
+<title>reliontree — {title_short}</title>
 <style>
 {theme_css}
   body {{ display: flex; height: 100vh; margin: 0; }}
@@ -22,8 +23,11 @@ _PAGE = """<!doctype html>
   #sidebar {{ width: 280px; flex: none; overflow-y: auto; border-right: 1px solid var(--border);
               background: var(--surface); padding: 12px 0; }}
   #sidebar input[type=text] {{ width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px; box-sizing: border-box; }}
-  .job-item {{ display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
-               padding: 6px 12px; cursor: pointer; font-size: 12px; border-left: 3px solid transparent; }}
+  .job-item {{ display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
+               padding: 5px 12px 5px 9px; cursor: pointer; font-size: 12px; border-left: 4px solid transparent; }}
+  .job-item.side .job-label {{ opacity: 0.6; }}
+  .job-item .jid {{ font-size: 10px; color: var(--text-muted); }}
+  .job-item .star {{ color: var(--accent); font-size: 11px; }}
   .job-item:hover {{ background: var(--neutral-bg) !important; }}
   .job-item.selected {{ background: var(--accent-bg) !important; font-weight: bold; }}
   .job-item .job-label {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
@@ -50,6 +54,11 @@ _PAGE = """<!doctype html>
   #main {{ flex: 1; overflow: auto; padding: 24px; }}
   .wrap {{ overflow: auto; padding: 12px; }}
   .job-card {{ cursor: pointer; }}
+  .job-card, .edge {{ transition: opacity 0.12s; }}
+  svg .dim {{ opacity: 0.15 !important; }}
+  .focus-main .job-card:not(.main), .focus-main .edge:not(.main) {{ opacity: 0.18 !important; }}
+  #updated {{ font-size: 12px; color: var(--text-muted); align-self: center; margin-left: 8px; }}
+  #toolbar button.on {{ background: var(--accent-bg); border-color: var(--accent); }}
   #toolbar {{ margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap; }}
   #toolbar button {{ font-size: 12px; }}
   #toolbar label {{ font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-left: 8px; }}
@@ -97,6 +106,7 @@ _PAGE = """<!doctype html>
                 max-height: 85vh; overflow-y: auto; overflow-x: auto; }}
   .modal-box table.diff {{ table-layout: auto; }}
   .modal-box td.diff-key {{ padding-top: 10px; }}
+{view_css}
 </style>
 </head>
 <body>
@@ -110,6 +120,8 @@ _PAGE = """<!doctype html>
       <option value="failed">failed</option>
       <option value="running">running</option>
       <option value="aborted">aborted</option>
+      <option value="scheduled">scheduled</option>
+      <option value="missing">missing</option>
       <option value="unknown">unknown</option>
     </select>
   </div>
@@ -127,18 +139,27 @@ _PAGE = """<!doctype html>
   <div id="jobList"></div>
 </div>
 <div id="main">
-<h1>{title}</h1>
+<h1 title="{title}">{title_short}</h1>
 <div id="toolbar">
   <button id="viewToggle" onclick="toggleView()">&#9638; Table view</button>
-  <button onclick="exportSvg()">Export SVG</button>
-  <button onclick="exportPng()">Export PNG</button>
-  <button onclick="exportCsv()">Export CSV</button>
-  <button onclick="exportJson()">Export JSON</button>
+  <select id="exportSel" onchange="doExport(this.value); this.value = ''" title="export the tree or the table">
+    <option value="">Export&hellip;</option><option value="svg">SVG (tree)</option><option value="png">PNG (tree)</option>
+    <option value="csv">CSV (table)</option><option value="json">JSON (data)</option></select>
   <button onclick="location.reload()">&#8635; Update now</button>
+  <span id="pathBar"><span class="lbl">Paths</span>
+    <span class="seg"><button id="vAll" class="on" onclick="setViewMode('all')" title="whole tree, selected paths highlighted">Full tree</button><button id="vOnly" onclick="setViewMode('only')" disabled title="only the selected paths, laid out compactly">Selection only</button></span>
+    <button id="pLatest" onclick="showLatest()" title="path that led to the latest result">&#9733; Latest</button>
+    <select id="pathPick" onchange="pickPath(this.value); this.value = ''" title="choose a result to show its path (first pick = A, next = B)"><option value="">Path to&hellip;</option></select>
+    <span id="pA" class="pchip pchip-a" hidden></span><span id="pB" class="pchip pchip-b" hidden></span>
+    <button id="pClear" onclick="clearPaths()" title="deselect both paths" hidden>Clear</button></span>
+  <span id="zoomBar"><button onclick="zoomBy(1/1.25)" title="zoom out">&minus;</button><button onclick="zoomBy(1.25)" title="zoom in">+</button>
+    <button onclick="actualSize()" title="cards at actual size, back to the top">100%</button><button onclick="overview()" title="whole tree on one screen">Overview</button></span>
   {auto_refresh_toggle}
+  <span id="updated"></span>
   <button onclick="openDrawer('browse')" style="margin-left:auto">&#128194; Browse project</button>
 </div>
 {scope_banner}
+<div id="pathPanel" hidden></div>
 <div class="wrap" id="treeView">
 {svg}
 </div>
@@ -172,7 +193,11 @@ function download(filename, text, mime) {{
 }}
 
 function svgSource() {{
-  return new XMLSerializer().serializeToString(document.querySelector(".wrap svg"));
+  // export the whole tree at 1:1, not the current pan/zoom window
+  const c = document.querySelector(".wrap svg").cloneNode(true);
+  c.setAttribute("width", c.dataset.w); c.setAttribute("height", c.dataset.h);
+  c.setAttribute("viewBox", "0 0 " + c.dataset.w + " " + c.dataset.h);
+  return new XMLSerializer().serializeToString(c);
 }}
 
 function exportSvg() {{
@@ -181,7 +206,7 @@ function exportSvg() {{
 
 function exportPng() {{
   const svg = document.querySelector(".wrap svg");
-  const w = svg.width.baseVal.value, h = svg.height.baseVal.value;
+  const w = +svg.dataset.w, h = +svg.dataset.h;
   const img = new Image();
   const svgBlob = new Blob([svgSource()], {{type: "image/svg+xml;charset=utf-8"}});
   const url = URL.createObjectURL(svgBlob);
@@ -204,6 +229,10 @@ function exportPng() {{
   img.src = url;
 }}
 
+function doExport(kind) {{
+  ({{svg: exportSvg, png: exportPng, csv: exportCsv, json: exportJson}})[kind]?.();
+}}
+
 function exportCsv() {{
   download("jobs.csv", CSV_TEXT, "text/csv");
 }}
@@ -217,11 +246,34 @@ function esc(s) {{
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }}
 
+// Lineage highlight: hovering (or selecting) a job keeps its ancestors and
+// descendants lit and dims the rest of the tree. Pure DOM, uses JOBS[*].parents.
+let pinned = null;
+function lineage(job) {{
+  const kids = {{}};
+  for (const j of Object.keys(JOBS)) for (const p of JOBS[j].parents) (kids[p] = kids[p] || []).push(j);
+  const keep = new Set([job]);
+  for (const [next, start] of [[j => JOBS[j] ? JOBS[j].parents : [], job], [j => kids[j] || [], job]]) {{
+    const todo = [start];
+    while (todo.length) for (const n of next(todo.pop())) if (!keep.has(n)) {{ keep.add(n); todo.push(n); }}
+  }}
+  return keep;
+}}
+function highlight(job) {{
+  if (typeof PATH !== "undefined" && (PATH.A || PATH.B)) job = null;
+  const keep = job ? lineage(job) : null;
+  document.querySelectorAll("svg .job-card").forEach(el => el.classList.toggle("dim", !!keep && !keep.has(el.dataset.job)));
+  document.querySelectorAll("svg .edge").forEach(el => el.classList.toggle("dim", !!keep && !(keep.has(el.dataset.from) && keep.has(el.dataset.to))));
+}}
+
 function openDrawer(id) {{
   document.querySelectorAll(".drawer").forEach(el => el.classList.toggle("open", el.id === id));
 }}
 
 function closeDrawers() {{
+  pinned = null;
+  highlight(null);
+  try {{ history.replaceState(null, "", location.pathname + location.search); }} catch (e) {{}}
   document.querySelectorAll(".drawer").forEach(el => el.classList.remove("open"));
 }}
 
@@ -311,7 +363,7 @@ function loadOverlap(el) {{
       const tot = j.classes_b.reduce((sum, y) => sum + cnt(x, y), 0) || 1;
       t += "<tr><th>c" + x + "</th>" + j.order_b.map(y => {{
         const f = cnt(x, y) / tot;
-        return "<td title='" + cnt(x, y).toLocaleString() + " particles' style='text-align:center;min-width:48px;padding:6px;background:color-mix(in srgb, var(--accent) " +
+        return "<td title='" + cnt(x, y).toLocaleString('en-US') + " particles' style='text-align:center;min-width:48px;padding:6px;background:color-mix(in srgb, var(--accent) " +
           Math.round(f * 100) + "%, transparent)'>" + (f * 100).toFixed(0) + "%</td>";
       }}).join("") + "</tr>";
     }}
@@ -354,7 +406,7 @@ function toggleView() {{
   document.getElementById("treeView").style.display = showingTable ? "" : "none";
   document.getElementById("tableView").style.display = showingTable ? "none" : "";
   document.getElementById("viewToggle").textContent = showingTable ? "Table view" : "Tree view";
-  if (!showingTable) renderTableView();
+  if (!showingTable) renderTableView(); else if (typeof applyView === "function") applyView();
   // Auto-refresh does a real location.reload() (see below), which always
   // comes back on tree view -- same "my choice keeps resetting" bug as
   // the sidebar filters, fixed the same way: persist across the reload.
@@ -381,13 +433,13 @@ function renderTableView() {{
     const info = JOBS[job];
     const tr = document.createElement("tr");
     tr.onclick = () => {{ toggleView(); selectJob(job); }};
-    tr.innerHTML = "<td>" + esc(job) + "</td><td>" + esc(jobType(job)) + "</td>" +
+    tr.innerHTML = "<td>" + esc(job) + (info.alias ? " <span class=note>" + esc(info.alias) + "</span>" : "") + "</td><td>" + esc(jobType(job)) + "</td>" +
       "<td><span class='badge badge-" +
       ({{succeeded: "good", failed: "bad", running: "warn", aborted: "warn"}}[info.state] || "neutral") +
       "'>" + esc(info.state) + "</span></td>" +
       "<td>" + esc(info.parents.join(", ")) + "</td>" +
       "<td>" + (info.resolution_angstrom ? info.resolution_angstrom.toFixed(1) + " Å" : "") + "</td>" +
-      "<td>" + (info.n_particles ? info.n_particles.toLocaleString() : "") + "</td>" +
+      "<td>" + (info.n_particles ? info.n_particles.toLocaleString('en-US') : "") + "</td>" +
       "<td>" + switchHtml(job) + "</td>";
     body.appendChild(tr);
   }}
@@ -400,7 +452,7 @@ function renderJobList(filter) {{
   const convFilter = document.getElementById("convFilter").value;
   list.innerHTML = "";
   for (const job of Object.keys(JOBS)) {{
-    if (filter && job.toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
+    if (filter && (job + " " + JOBS[job].alias + " " + JOBS[job].notes + " " + JOBS[job].state).toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
     if (typeFilter && jobType(job) !== typeFilter) continue;
     if (stateFilter && JOBS[job].state !== stateFilter) continue;
     if (convFilter) {{
@@ -412,7 +464,7 @@ function renderJobList(filter) {{
     div.dataset.job = job;
     const jobColor = TYPE_COLORS[job] || "#616161";
     div.style.borderLeftColor = jobColor;
-    div.style.background = jobColor + "48";
+    if (JOBS[job].side) div.classList.add("side");
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
@@ -428,9 +480,32 @@ function renderJobList(filter) {{
     const info = JOBS[job];
     const label = document.createElement("span");
     label.className = "job-label";
-    label.textContent = job;
+    label.textContent = JOBS[job].alias || job;
+    label.title = job + (JOBS[job].notes ? "\\n" + JOBS[job].notes : "");
     div.appendChild(label);
+    if (JOBS[job].alias) {{
+      const jid = document.createElement("span");
+      jid.className = "jid";
+      jid.textContent = job.split("/")[1];
+      div.appendChild(jid);
+    }}
+    if (JOBS[job].latest || JOBS[job].best) {{
+      const star = document.createElement("span");
+      star.className = "star";
+      star.textContent = "\u2605";
+      star.title = [JOBS[job].latest ? "latest result" : "", JOBS[job].best ? "best resolution" : ""].filter(Boolean).join(" + ");
+      div.appendChild(star);
+    }}
     div.onclick = () => selectJob(job);
+    if (document.getElementById("card-" + job)) {{
+      for (const slot of ["A", "B"]) {{
+        const pb = document.createElement("button");
+        pb.type = "button"; pb.className = "pick pick-" + slot.toLowerCase(); pb.textContent = slot;
+        pb.title = "show the path to this job as path " + slot + (slot === "B" ? " (compare)" : "");
+        pb.onclick = (e) => {{ e.stopPropagation(); setPath(slot, job); }};
+        div.appendChild(pb);
+      }}
+    }}
     if (INTERACTIVE) {{
       const btn = document.createElement("button");
       btn.className = "tree-btn";
@@ -452,8 +527,8 @@ function renderJobList(filter) {{
     stateBadge.textContent = info.state;
     meta.appendChild(stateBadge);
     let extra = "";
-    if (info.resolution_angstrom) extra += info.resolution_angstrom.toFixed(1) + "Å";
-    if (info.n_particles) extra += (extra ? "  " : "") + info.n_particles.toLocaleString();
+    if (info.resolution_angstrom) extra += info.resolution_angstrom.toFixed(1) + " Å";
+    if (info.n_particles) extra += (extra.trim() ? "  " : "") + info.n_particles.toLocaleString('en-US');
     if (extra) meta.appendChild(document.createTextNode(extra));
     const sw = document.createElement("span");
     sw.innerHTML = switchHtml(job) ? "&#8635; " + switchHtml(job) : "";
@@ -463,6 +538,7 @@ function renderJobList(filter) {{
 
     list.appendChild(div);
   }}
+  try {{ markSidebar(); }} catch (e) {{}}  // path view not initialised yet on the first call
 }}
 
 // Collapsed by default. One card per class (map thumbnail, share bar) and
@@ -586,24 +662,32 @@ function classesBlock(job, hist, thumbs) {{
 }}
 
 function selectJob(job) {{
+  pinned = job;
+  highlight(job);
+  try {{ history.replaceState(null, "", "#" + encodeURIComponent(job)); }} catch (e) {{}}
   document.querySelectorAll(".job-item").forEach(el => {{
     el.classList.toggle("selected", el.dataset.job === job);
   }});
-  const card = document.getElementById("card-" + CSS.escape(job));
-  if (card) card.scrollIntoView({{behavior: "smooth", block: "center", inline: "center"}});
 
   const info = JOBS[job];
   const detail = document.getElementById("detail");
-  const chips = ["<span class=chip>" + esc(info.state) + "</span>"];
+  const chips = [];
+  if (info.latest) chips.push("<span class=chip>&#9733; latest result</span>");
+  if (info.best) chips.push("<span class=chip>&#9733; best resolution</span>");
+  chips.push("<span class=chip>" + esc(info.state) + "</span>");
   if (info.resolution_angstrom) chips.push("<span class=chip>" + info.resolution_angstrom.toFixed(1) + " &Aring;</span>");
-  if (info.n_particles) chips.push("<span class=chip>" + info.n_particles.toLocaleString() + " particles</span>");
+  if (info.n_particles) chips.push("<span class=chip>" + info.n_particles.toLocaleString('en-US') + " particles</span>");
   const runtime = formatDuration(info.runtime_seconds);
   if (runtime) chips.push("<span class=chip>" + runtime + "</span>");
   const optKeys = Object.keys(info.options).sort();
   const optRows = optKeys.map(k => "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>").join("");
   const q = job.replace(/'/g, "\\\\'");
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
-    "<h2>" + esc(job) + "</h2><div class=chips>" + chips.join("") + "</div>" +
+    "<h2>" + esc(info.alias || job) + "</h2>" + (info.alias ? "<p class=note style='margin:-8px 0 8px'>" + esc(job) + "</p>" : "") +
+    (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
+      "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
+    "<div class=chips>" + chips.join("") + "</div>" +
+    (info.notes ? "<details class=sec open><summary>Notes</summary><p style='white-space:pre-wrap;margin:4px 0'>" + esc(info.notes) + "</p></details>" : "") +
     classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
     "<details class=sec open><summary>Lineage</summary>" +
     "<p class=note>Parents: " + (info.parents.map(esc).join(", ") || "(none)") + "</p>" +
@@ -612,6 +696,7 @@ function selectJob(job) {{
   if (INTERACTIVE && info.classes && info.classes.length) setClassIter(info.classes.length - 1);
   if (INTERACTIVE && info.selection) paintSelection(info);
   openDrawer("detail");
+  centerOn(job);
 }}
 
 const typeFilterEl = document.getElementById("typeFilter");
@@ -677,8 +762,30 @@ if (AUTO_REFRESH_SECONDS > 0) {{
 
 document.querySelectorAll(".job-card").forEach(el => {{
   el.style.cursor = "pointer";
-  el.addEventListener("click", () => selectJob(el.dataset.job));
+  el.addEventListener("click", () => {{ if (!dragged) selectJob(el.dataset.job); }});
+  el.addEventListener("mouseenter", () => highlight(el.dataset.job));
+  el.addEventListener("mouseleave", () => highlight(pinned));
 }});
+
+// Deep link: #Class3D/job004 opens that job's drawer.
+document.querySelectorAll(".mask-chip").forEach(el => el.addEventListener("click", e => {{ e.stopPropagation(); selectJob(el.dataset.job); }}));
+{view_js}
+restorePaths();
+try {{
+  const hashJob = decodeURIComponent(location.hash.slice(1));
+  if (hashJob && JOBS[hashJob]) selectJob(hashJob);
+}} catch (e) {{}}
+
+// "updated 12 s ago" -- the page is a snapshot (auto-refresh reloads it).
+const loadedAt = Date.now();
+function tickUpdated() {{
+  const s = Math.round((Date.now() - loadedAt) / 1000);
+  const running = Object.keys(JOBS).filter(j => JOBS[j].state === "running").length;
+  document.getElementById("updated").textContent = "updated " + (s < 60 ? s + " s" : Math.round(s / 60) + " min") + " ago" +
+    (running ? " \u00b7 " + running + " running" : "");
+}}
+tickUpdated();
+setInterval(tickUpdated, 1000);
 </script>
 </body>
 </html>
@@ -728,12 +835,17 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     else:
         scope_banner = ""
     jobs = {}
-    for job in ordered_jobs(tree):
+    for job in sorted(ordered_jobs(tree), key=lambda j: (int(j.rsplit("job", 1)[-1]) if j.rsplit("job", 1)[-1].isdigit() else 0, j)):  # chronological
         artifacts = tree["artifacts"].get(job, {})
         stats = tree["stats"].get(job, {})
         thumb_job = tree["selection"][job]["parent"] if job in tree["selection"] else job
         jobs[job] = {
             "state": artifacts.get("state", "unknown"),
+            "alias": tree["alias"].get(job, ""),
+            "notes": tree["notes"].get(job, ""),
+            "latest": job == tree["latest"], "best": job == tree["best"],
+            "main": job in tree["main"], "side": job in tree["side"],
+            "chips": tree["chips"].get(job, []),
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "n_particles": stats.get("n_particles"),
             "runtime_seconds": stats.get("runtime_seconds"),
@@ -753,13 +865,14 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         for job in ordered_jobs(tree)
     }
     return _PAGE.format(
-        title=title, theme_css=THEME_CSS, svg=render_svg(tree),
+        title=html.escape(title), title_short=html.escape(title.rstrip("/").split("/")[-1] or title), theme_css=THEME_CSS, svg=render_svg(tree, fit=True),
         jobs_json=json.dumps(jobs), csv_json=json.dumps(rows_to_csv(rows)),
         browse_panel=browse_html if browse_html is not None else _NO_BROWSE_PANEL,
         auto_refresh_toggle=auto_refresh_toggle,
         auto_refresh_seconds=refresh_seconds or 0,
         scope_banner=scope_banner,
         interactive_json=json.dumps(bool(interactive)),
+        view_css=VIEW_CSS, view_js=VIEW_JS,
         settled=SETTLED_CHANGES, tiny=TINY_SHARE,
         type_colors_json=json.dumps(type_colors),
     )

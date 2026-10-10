@@ -35,6 +35,7 @@ from .relion_classes import class_iter_thumbs, class_overlap
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
+from . import relion_plan
 from .relion_project import ProjectNotFoundError, find_project
 from .render_html import render_html
 
@@ -125,6 +126,30 @@ def cmd_diff(args):
         if not result["varying"]:
             lines.append("  (none -- all identical)")
         _write("\n".join(lines), args.out)
+
+
+def cmd_plan(args):
+    """plan check (dry run, default) / plan apply (register as Scheduled, runs nothing)."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    rows = relion_plan.resolve(project, relion_plan.load(args.plan))
+    lines, bad = [], False
+    for r in rows:
+        lines.append("%s  <- %s%s" % (r["id"], r["from"], "  alias=" + r["alias"] if r["alias"] else ""))
+        for k, (a, b) in sorted(r["changed"].items()):
+            lines.append("    %-28s %s -> %s" % (k, a, b))
+        for e in r["errors"]:
+            lines.append("    ERROR: " + e)
+            bad = True
+    if args.apply and not bad:
+        made = relion_plan.apply(project, rows)
+        lines.append("")
+        lines += ["registered %s as %s (Scheduled, not started)" % (k, v) for k, v in made.items()]
+        Path(args.plan).with_suffix(".applied.json").write_text(json.dumps(made, indent=2))
+    elif args.apply:
+        lines.append("\nnot applied: fix the errors above")
+    _write("\n".join(lines), None)
+    if bad:
+        sys.exit(2)
 
 
 def cmd_overlap(args):
@@ -463,6 +488,12 @@ def main(argv=None):
     sp.add_argument("--format", choices=["text", "json"], default="text")
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("plan", help="plan.json -> new jobs: dry run by default, --apply registers them as Scheduled (runs nothing)")
+    sp.add_argument("plan", help="plan file (JSON)")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--apply", action="store_true", help="register via relion_pipeliner --addJobFromStar")
+    sp.set_defaults(func=cmd_plan)
 
     sp = sub.add_parser("overlap", help="particle overlap matrix between two classification jobs")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
