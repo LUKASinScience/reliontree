@@ -452,7 +452,7 @@ function renderJobList(filter) {{
   const convFilter = document.getElementById("convFilter").value;
   list.innerHTML = "";
   for (const job of Object.keys(JOBS)) {{
-    if (filter && (job + " " + JOBS[job].alias + " " + JOBS[job].notes + " " + JOBS[job].state).toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
+    if (filter && (job + " " + JOBS[job].alias + " " + JOBS[job].notes + " " + JOBS[job].state + " " + JOBS[job].annotations.map(a => a.label).join(" ")).toLowerCase().indexOf(filter.toLowerCase()) === -1) continue;
     if (typeFilter && jobType(job) !== typeFilter) continue;
     if (stateFilter && JOBS[job].state !== stateFilter) continue;
     if (convFilter) {{
@@ -483,6 +483,13 @@ function renderJobList(filter) {{
     label.textContent = JOBS[job].alias || job;
     label.title = job + (JOBS[job].notes ? "\\n" + JOBS[job].notes : "");
     div.appendChild(label);
+    if (JOBS[job].annotations.length) {{
+      const worst = JOBS[job].annotations[0], flag = document.createElement("span");
+      flag.className = "flag lvl-" + worst.level;
+      flag.textContent = "\u2691";
+      flag.title = JOBS[job].annotations.map(a => a.source + ": " + a.label).join("\\n");
+      div.appendChild(flag);
+    }}
     if (JOBS[job].alias) {{
       const jid = document.createElement("span");
       jid.className = "jid";
@@ -687,6 +694,9 @@ function selectJob(job) {{
     (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
       "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
     "<div class=chips>" + chips.join("") + "</div>" +
+    (info.annotations.length ? "<details class=sec open><summary>Notes from tools</summary>" + info.annotations.map(a =>
+      "<p style='margin:6px 0'><span class='lvl-dot lvl-" + a.level + "'></span><b>" + esc(a.label) + "</b> <span class=note>" + esc(a.source) + "</span>" +
+      (a.detail ? "<br><span style='font-size:12px'>" + esc(a.detail) + "</span>" : "") + "</p>").join("") + "</details>" : "") +
     (info.notes ? "<details class=sec open><summary>Notes</summary><p style='white-space:pre-wrap;margin:4px 0'>" + esc(info.notes) + "</p></details>" : "") +
     classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
     "<details class=sec open><summary>Lineage</summary>" +
@@ -799,6 +809,12 @@ _NO_BROWSE_PANEL = """<div id="browse" class="drawer">
 run <code>reliontree watch</code> instead of a static export.</p></div>"""
 
 
+def _js(obj):
+    """JSON for embedding inside a <script> block: `</script>` in a job note,
+    alias or tool annotation must not be able to end the block."""
+    return json.dumps(obj).replace("</", "<\\/")
+
+
 def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html=None,
                  selected_job=None, interactive=False):
     """A single self-contained HTML string embedding the SVG tree plus a
@@ -846,6 +862,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "latest": job == tree["latest"], "best": job == tree["best"],
             "main": job in tree["main"], "side": job in tree["side"],
             "chips": tree["chips"].get(job, []),
+            "annotations": tree.get("annotations", {}).get(job, []),
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "n_particles": stats.get("n_particles"),
             "runtime_seconds": stats.get("runtime_seconds"),
@@ -866,7 +883,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     }
     return _PAGE.format(
         title=html.escape(title), title_short=html.escape(title.rstrip("/").split("/")[-1] or title), theme_css=THEME_CSS, svg=render_svg(tree, fit=True),
-        jobs_json=json.dumps(jobs), csv_json=json.dumps(rows_to_csv(rows)),
+        jobs_json=_js(jobs), csv_json=_js(rows_to_csv(rows)),
         browse_panel=browse_html if browse_html is not None else _NO_BROWSE_PANEL,
         auto_refresh_toggle=auto_refresh_toggle,
         auto_refresh_seconds=refresh_seconds or 0,
@@ -874,5 +891,5 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         interactive_json=json.dumps(bool(interactive)),
         view_css=VIEW_CSS, view_js=VIEW_JS,
         settled=SETTLED_CHANGES, tiny=TINY_SHARE,
-        type_colors_json=json.dumps(type_colors),
+        type_colors_json=_js(type_colors),
     )
