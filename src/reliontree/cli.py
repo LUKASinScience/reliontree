@@ -129,6 +129,23 @@ def cmd_diff(args):
         _write("\n".join(lines), args.out)
 
 
+def cmd_analyze(args):
+    """Run relion-origin's per-particle checks (orientation gaps, mixing beyond chance) and write them where the view
+    picks them up. relion-origin is an optional companion (numpy, pandas, starfile): it is imported here and nowhere
+    else, so everything else in reliontree works without it."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    try:
+        from relion_origin.annotations import annotate_project, write_annotations
+    except ImportError:
+        raise ValueError("`reliontree analyze` needs the optional companion relion-origin, which is not installed "
+                         "(pip install relion-origin; see the README, 'Optional companion')")
+    notes, skipped = annotate_project(project)
+    path = write_annotations(project, "relion-origin", notes)
+    print("wrote %d job(s) with findings to %s" % (len(notes), path))
+    for job, why in skipped:
+        print("skipped %s: %s" % (job, why), file=sys.stderr)
+
+
 def cmd_plan(args):
     """plan check (dry run, default) / plan apply (register as Scheduled, runs nothing)."""
     project = Path(args.project) if getattr(args, "project", None) else find_project()
@@ -436,21 +453,7 @@ def _default(project=None):
     cmd_watch(args)
 
 
-_SUBCOMMANDS = {"tree", "table", "methods", "diff", "why", "overlap", "watch"}
-
-
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-
-    # `reliontree /path/to/project` (no subcommand) — the same zero-config
-    # `watch` view as bare `reliontree`, just pointed at an explicit
-    # directory instead of auto-detecting from cwd. argparse's subparsers
-    # can't cleanly accept "either a subcommand name or a bare path" as the
-    # first token, so it's sniffed here instead of fighting argparse for it.
-    if argv and argv[0] not in _SUBCOMMANDS and not argv[0].startswith("-"):
-        _default(project=argv[0])
-        return
-
+def _build_parser():
     p = argparse.ArgumentParser(
         prog="reliontree",
         description=__doc__.split("\n\n")[0],
@@ -493,6 +496,10 @@ def main(argv=None):
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_diff)
 
+    sp = sub.add_parser("analyze", help="run the optional relion-origin checks and show the findings as pills on the job cards")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.set_defaults(func=cmd_analyze)
+
     sp = sub.add_parser("plan", help="plan.json -> new jobs: dry run by default, --apply registers them as Scheduled (runs nothing)")
     sp.add_argument("plan", help="plan file (JSON)")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
@@ -522,6 +529,28 @@ def main(argv=None):
     sp.add_argument("--interval", type=int, default=10, help="browser auto-refresh interval in seconds")
     sp.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
     sp.set_defaults(func=cmd_watch)
+
+    p.subcommand_names = frozenset(sub.choices)
+    return p
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    p = _build_parser()
+    subcommands = p.subcommand_names   # read from the parser: a hand-kept list drifted (plan, analyze never worked)
+
+    # `reliontree /path/to/project` (no subcommand) — the same zero-config
+    # `watch` view as bare `reliontree`, just pointed at an explicit
+    # directory instead of auto-detecting from cwd. argparse's subparsers
+    # can't cleanly accept "either a subcommand name or a bare path" as the
+    # first token, so it's sniffed here instead of fighting argparse for it.
+    if argv and argv[0] not in subcommands and not argv[0].startswith("-"):
+        if not Path(argv[0]).exists():
+            print("reliontree: %r is neither a command nor an existing directory (commands: %s)" % (argv[0], ", ".join(sorted(subcommands))),
+                  file=sys.stderr)
+            sys.exit(2)
+        _default(project=argv[0])
+        return
 
     args = p.parse_args(argv)
     try:

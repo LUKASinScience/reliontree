@@ -1,3 +1,5 @@
+import pytest
+from pathlib import Path
 from reliontree.relion_pipeline import load_meta
 from reliontree.relion_treebuild import user_notes, find_main_path, route_edges, CARD_W
 
@@ -173,3 +175,44 @@ def test_project_type_badge_is_shown_and_escaped(tmp_path):
     _pipeline(tmp_path, [("Refine3D/job001", "relion.refine3d.tomo")])
     page = render_html(build_tree(tmp_path))
     assert 'class="exp-badge"' in page and "STA · subtomogram averaging" in page and "relion.refine3d.tomo" in page
+
+
+def test_analyze_needs_the_optional_companion_and_uses_it_when_present(tmp_path, monkeypatch, capsys):
+    import sys
+    import types
+    from reliontree import cli
+    _pipeline(tmp_path, [("Class3D/job001", "relion.class3d")])
+    # not installed: a clear message and exit code 2, nothing else breaks
+    monkeypatch.setitem(sys.modules, "relion_origin", None)
+    monkeypatch.setitem(sys.modules, "relion_origin.annotations", None)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["analyze", str(tmp_path)])
+    assert e.value.code == 2 and "relion-origin" in capsys.readouterr().err
+    # installed: findings land in the annotation file the view reads
+    written = {}
+    fake = types.ModuleType("relion_origin.annotations")
+    fake.annotate_project = lambda project: ({"Class3D/job001": [{"label": "views: 50% of sphere sparse", "level": "warn"}]}, [])
+    fake.write_annotations = lambda project, tool, notes: written.update(tool=tool, notes=notes) or Path(project) / "x.json"
+    monkeypatch.setitem(sys.modules, "relion_origin", types.ModuleType("relion_origin"))
+    monkeypatch.setitem(sys.modules, "relion_origin.annotations", fake)
+    cli.main(["analyze", str(tmp_path)])
+    assert written["tool"] == "relion-origin" and "Class3D/job001" in written["notes"]
+
+
+def test_every_subcommand_is_reachable_from_the_command_line():
+    """`reliontree plan` and `analyze` were once treated as project folders (the zero-config `reliontree <path>`
+    shortcut) because a hand-kept command list missed them."""
+    from reliontree import cli
+    names = cli._build_parser().subcommand_names
+    assert {"tree", "table", "methods", "diff", "why", "overlap", "watch", "plan", "analyze"} <= names
+    for name in sorted(names):
+        with pytest.raises(SystemExit) as e:
+            cli.main([name, "--help"])
+        assert e.value.code == 0, name
+
+
+def test_unknown_word_is_an_error_not_a_server(capsys):
+    from reliontree import cli
+    with pytest.raises(SystemExit) as e:
+        cli.main(["analyse"])
+    assert e.value.code == 2 and "neither a command nor an existing directory" in capsys.readouterr().err
