@@ -266,9 +266,9 @@ def _latest_model_star(job_dir):
 
 
 def _refine_particle_total(job_dir):
-    """Particle count of a gold-standard Refine3D job. RELION splits the data into two random halves and writes
+    """Particle count of a gold-standard Refine3D job, both halves together. RELION splits the data into two random halves and writes
     one `*_half1_model.star` and one `*_half2_model.star` per iteration, each counting only its own half, and
-    `run_model.star` does the same -- reading a single model.star shows half the particles. Sums both halves of the
+    `run_model.star` does the same -- a single model.star shows one half (the number the cards show, as in half-map work). Sums both halves of the
     newest iteration that has both; None when this isn't a half-split job."""
     pattern = re.compile(r"run_it(\d+)_half([12])_model\.star$")
     found = {}
@@ -344,13 +344,12 @@ def job_stats(job_dir):
             if resolution is None:
                 resolution = _find_scalar_field(text, "_rlnCurrentResolution")
             n_particles = _sum_loop_column(text, "_rlnGroupNrParticles")
-    halves = _refine_particle_total(job_dir)
-    if halves is not None:
-        n_particles = halves
+    n_total = _refine_particle_total(job_dir)   # both random halves; n_particles stays what run_model.star reports (one half)
 
     return {
         "resolution_angstrom": resolution,
         "n_particles": n_particles,
+        "n_particles_total": n_total if n_total is not None else n_particles,
         "runtime_seconds": _runtime_seconds(job_dir),
     }
 

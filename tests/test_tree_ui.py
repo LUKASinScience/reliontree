@@ -114,7 +114,7 @@ def test_many_class_job_card_is_capped_and_missing_jobs_are_compact(tmp_path):
     assert big in keep
 
 
-def test_refine3d_particle_count_adds_both_halves(tmp_path):
+def test_refine3d_reports_one_half_and_exposes_the_total(tmp_path):
     from reliontree.relion_artifacts import job_stats
     def model(n_a, n_b):
         return ("data_model_groups\n\nloop_\n_rlnGroupNumber #1\n_rlnGroupName #2\n_rlnGroupNrParticles #3\n"
@@ -124,4 +124,5 @@ def test_refine3d_particle_count_adds_both_halves(tmp_path):
     (tmp_path / "run_it003_half2_model.star").write_text(model(10, 20))
     (tmp_path / "run_it004_half1_model.star").write_text(model(30, 34))
     (tmp_path / "run_it004_half2_model.star").write_text(model(31, 33))
-    assert job_stats(tmp_path)["n_particles"] == 128                      # 64 + 64, not 64
+    stats = job_stats(tmp_path)
+    assert stats["n_particles"] == 64 and stats["n_particles_total"] == 128   # shown: one half (half-map convention); total kept for consumers
