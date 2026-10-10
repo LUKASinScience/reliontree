@@ -16,7 +16,6 @@ except ImportError:
 # Single source of truth for the thresholds: the viewer (cards, drawer, JS)
 # and relion-copilot's rule all read these.
 SETTLED_CHANGES = 0.05    # <= this share of particles switching class per iteration = converged
-MANY_ITERATIONS = 20      # beyond this, still-switching particles point to class count, not iterations
 TINY_SHARE = 0.02         # a class below this share of the particles counts as (nearly) empty
 
 _ITER = re.compile(r"run_it(\d+)_model\.star$")
@@ -104,30 +103,25 @@ def class_iter_thumbs(job_dir, iteration, size=72, only=None):
     return out
 
 
-def class_advice(hist):
-    """Convergence verdict + next action for a classification's history
-    (`class_history`), or None if there are fewer than 3 iterations to judge.
-    {"converged": bool, "action": "none"|"more_iterations"|"more_classes"|"fewer_classes",
-     "switching": float, "iter": int, "message": str}.
-    Rules: <=5% switching = converged. Otherwise nearly-empty classes mean K
-    is already too high (-> fewer classes); else after more than 20
-    iterations a class is probably missing (-> more classes); else the run
-    was simply short (-> more iterations)."""
+def class_convergence(hist):
+    """What a classification's history (`class_history`) shows -- a statement, not a recommendation -- or None if there
+    are fewer than 3 iterations to judge: {"converged": bool, "switching": share of particles that changed class in the
+    last iteration, "iter": that iteration, "empty_classes": [numbers of classes below TINY_SHARE], "n_classes": int,
+    "message": str}. "converged" = at most SETTLED_CHANGES switching. What to do about it (more iterations, more or
+    fewer classes) is relion-copilot's job, not this viewer's."""
     pts = [h for h in hist if h["changes_classes"] is not None and h["iter"] > 0]
     if len(pts) < 3:
         return None
     last, shares = pts[-1], hist[-1]["shares"]
-    out = {"switching": last["changes_classes"], "iter": last["iter"]}
-    if last["changes_classes"] <= SETTLED_CHANGES:
-        return dict(out, converged=True, action="none", message="Converged: %.1f%% of particles switched class in iteration %d." % (last["changes_classes"] * 100, last["iter"]))
+    switching = last["changes_classes"]
+    converged = switching <= SETTLED_CHANGES
     empty = [i + 1 for i, v in enumerate(shares) if v < TINY_SHARE]
-    if empty:
-        action, msg = "fewer_classes", "class %s nearly empty, so %d classes is already too many -- reduce the number of classes rather than adding more" % (", ".join(map(str, empty)), len(shares))
-    elif last["iter"] > MANY_ITERATIONS:
-        action, msg = "more_classes", "%d iterations already ran, so a class is probably missing -- increase the number of classes (now %d) rather than adding iterations" % (last["iter"], len(shares))
-    else:
-        action, msg = "more_iterations", "only %d iterations ran -- continue the classification (more iterations)" % last["iter"]
-    return dict(out, converged=False, action=action, message="Not converged (%.0f%% still switching): %s." % (last["changes_classes"] * 100, msg))
+    message = ("Converged: %.1f%% of particles switched class in iteration %d." if converged else
+               "Not converged: %.1f%% of particles still switched class in iteration %d.") % (switching * 100, last["iter"])
+    if empty and not converged:
+        message += " Nearly empty: class %s." % ", ".join(map(str, empty))
+    return {"converged": converged, "switching": switching, "iter": last["iter"], "empty_classes": empty,
+            "n_classes": len(shares), "message": message}
 
 
 def match_columns(classes_a, classes_b, counts):
