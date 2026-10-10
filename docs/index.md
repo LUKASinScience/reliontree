@@ -7,16 +7,18 @@ X11, no root), or a cloud VM.
 
 ## Install and run
 
+reliontree is not on PyPI yet, so install it straight from GitHub:
+
 ```bash
-uvx reliontree
+uvx --from git+https://github.com/LUKASinScience/reliontree reliontree
 ```
 
-No `uv`? `pipx run reliontree` works the same way — both run reliontree in
-an isolated environment with nothing left behind. For a persistent
-installation in an existing environment:
+No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree reliontree` works the same way — both run
+reliontree in an isolated environment with nothing left behind. For a persistent installation in an existing environment
+(Python 3.9 or newer, no further dependencies):
 
 ```bash
-pip install reliontree
+pip install "git+https://github.com/LUKASinScience/reliontree"
 ```
 
 ## Zero-config
@@ -157,8 +159,9 @@ diff = reliontree.diff_options(tree["options"]["Refine3D/job039"], tree["options
 context = reliontree.job_context(tree, "Refine3D/job042")
 ```
 
-`tree` is a plain dict (`layers`, `parents`, `artifacts`, `stats`, `options`,
-`job_dirs`) — no custom classes to learn.
+`tree` is a plain dict — no custom classes to learn. The core keys are `layers`, `parents`, `artifacts`, `stats`, `options`
+and `job_dirs`; around them: `alias`, `notes`, `classes`, `selection`, `latest`/`best`/`main`/`side` (the path to the latest
+result), `masks`/`chips`, `annotations` and `experiment` (`{"type": "sta" | "spa" | "unknown", "evidence": ...}`).
 
 ## How reliontree fits alongside other RELION tools
 
