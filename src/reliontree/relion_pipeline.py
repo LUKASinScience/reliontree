@@ -111,8 +111,44 @@ def load_meta(project):
         label = row.get("_rlnPipeLineProcessStatusLabel", "").strip().lower()
         status = _PIPELINE_STATUS.get(label) or _PIPELINE_STATUS_CODE.get(row.get("_rlnPipeLineProcessStatus", "").strip(), "")
         if name:
-            meta[name] = {"alias": alias, "status": status}
+            meta[name] = {"alias": alias, "status": status,
+                          "type": row.get("_rlnPipeLineProcessTypeLabel", "").strip().lower()}
     return meta
+
+
+_SPA_ONLY_TYPES = ("relion.motioncorr", "relion.ctffind", "relion.autopick", "relion.class2d", "relion.manualpick")
+
+
+def detect_experiment(meta, job_dirs):
+    """Is this a subtomogram-averaging ("sta") or single-particle ("spa") project? Returns
+    {"type": "sta" | "spa" | "unknown", "evidence": str}.
+
+    Signals RELION itself writes: a process type label with "tomo" in it (relion.importtomo,
+    relion.pseudosubtomo, relion.refine3d.tomo, ...) and `_rlnJobIsTomo 1` in a job.star. Any such signal makes the project
+    STA; otherwise motion correction / CTF / 2D classification / picking jobs make it SPA. RELION 3.x pipelines have no
+    type labels, they are SPA by definition (tomography came with RELION 4)."""
+    tomo_labels = sorted({m["type"] for m in meta.values() if "tomo" in m.get("type", "")})
+    tomo_flags = 0
+    for job_dir in job_dirs:
+        try:
+            text = (Path(job_dir) / "job.star").read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if re.search(r"^_rlnJobIsTomo\s+1\s*$", text, re.MULTILINE):
+            tomo_flags += 1
+    if tomo_labels or tomo_flags:
+        bits = []
+        if tomo_labels:
+            bits.append("job types " + ", ".join(tomo_labels[:3]))
+        if tomo_flags:
+            bits.append("%d job.star with _rlnJobIsTomo 1" % tomo_flags)
+        return {"type": "sta", "evidence": "; ".join(bits)}
+    spa = sorted({m["type"] for m in meta.values() if m.get("type") in _SPA_ONLY_TYPES})
+    if spa:
+        return {"type": "spa", "evidence": "job types " + ", ".join(spa[:3])}
+    if meta and not any(m.get("type") for m in meta.values()):
+        return {"type": "spa", "evidence": "RELION 3.x pipeline (no tomography before RELION 4)"}
+    return {"type": "unknown", "evidence": "no tomography or single-particle specific job found"}
 
 
 def build_parents(procs, node_to_prod, proc_to_in):
