@@ -137,8 +137,8 @@ def cmd_analyze(args):
     try:
         from relion_origin.annotations import annotate_project, write_annotations
     except ImportError:
-        raise ValueError("`reliontree analyze` needs the optional companion relion-origin, which is not installed "
-                         "(pip install relion-origin; see the README, 'Optional companion')")
+        raise ValueError("`reliontree analyze` needs the optional companion relion-origin, which is not installed.\n"
+                         "Install relion-origin:  pip install \"git+https://github.com/LUKASinScience/relion-origin\"")
     notes, skipped = annotate_project(project)
     path = write_annotations(project, "relion-origin", notes)
     print("wrote %d job(s) with findings to %s" % (len(notes), path))

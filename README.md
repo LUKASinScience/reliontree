@@ -228,3 +228,7 @@ anyone else's sign-off. The practical effect of AGPL over plain GPL only
 bites if someone runs `reliontree watch` as a shared network service for
 other people — then those users must be offered the source, same as any
 local modifications.
+
+No third-party code is bundled or needed at run time (`dependencies = []`); the parts extracted from the author's own
+ChimeraX-InstantMap plugin (MIT) are the same author's code. Formats and commands of RELION itself (GPL) are only read and
+called, never copied.

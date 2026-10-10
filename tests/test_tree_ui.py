@@ -187,7 +187,8 @@ def test_analyze_needs_the_optional_companion_and_uses_it_when_present(tmp_path,
     monkeypatch.setitem(sys.modules, "relion_origin.annotations", None)
     with pytest.raises(SystemExit) as e:
         cli.main(["analyze", str(tmp_path)])
-    assert e.value.code == 2 and "relion-origin" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert e.value.code == 2 and "Install relion-origin" in err and "pip install" in err
     # installed: findings land in the annotation file the view reads
     written = {}
     fake = types.ModuleType("relion_origin.annotations")
