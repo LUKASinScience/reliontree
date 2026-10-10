@@ -82,3 +82,33 @@ MaskCreate/job001/ MaskCreate/job001/mask.mrc
     assert t["layers"] == [["Refine3D/job002"]] and t["masks"] == ["MaskCreate/job001"]
     svg = render_svg(t, fit=True)
     assert 'class="mask-chip"' in svg and 'id="card-MaskCreate' not in svg and 'viewBox="0 0' in svg
+
+
+def test_pipeline_status_beats_the_runout_guess_but_not_an_exit_marker(tmp_path):
+    from reliontree.relion_treebuild import build_tree
+    row = lambda job, status: "%s/ None relion.class3d %s\n" % (job, status)
+    star = ('data_pipeline_processes\n\nloop_\n_rlnPipeLineProcessName #1\n_rlnPipeLineProcessAlias #2\n'
+            '_rlnPipeLineProcessTypeLabel #3\n_rlnPipeLineProcessStatusLabel #4\n'
+            + row("Class3D/job001", "Succeeded") + row("Class3D/job002", "Running") + row("Class3D/job003", "Succeeded"))
+    (tmp_path / "default_pipeline.star").write_text(star)
+    for job, files in (("job001", ["run.out"]),                            # deposited copy: no marker, pipeline says Succeeded
+                       ("job002", ["run.out", "RELION_JOB_EXIT_SUCCESS"]),  # GUI closed before updating: the marker is newer
+                       ("job003", ["run.out", "RELION_JOB_EXIT_FAILURE"])):  # marker says failed, pipeline stale
+        d = tmp_path / "Class3D" / job
+        d.mkdir(parents=True)
+        for f in files:
+            (d / f).write_text("")
+    states = {j.split("/")[1]: a["state"] for j, a in build_tree(tmp_path)["artifacts"].items()}
+    assert states == {"job001": "succeeded", "job002": "succeeded", "job003": "failed"}
+
+
+def test_many_class_job_card_is_capped_and_missing_jobs_are_compact(tmp_path):
+    from reliontree.relion_treebuild import MAX_CLASS_THUMBS, pick_classes
+    shares = [0.001 * (i % 7) + 0.0001 * i for i in range(200)]
+    tree = {"classes": {"Class2D/job1": [{"shares": shares}], "Class3D/job2": [{"shares": [0.5, 0.3, 0.2]}]},
+            "chosen": {"Class2D/job1": {150: ["Select/job3"], 7: ["Select/job3"]}}}
+    keep = pick_classes(tree, "Class2D/job1")
+    assert len(keep) == MAX_CLASS_THUMBS and {150, 7} <= keep          # kept classes always shown, the rest by size
+    assert pick_classes(tree, "Class3D/job2") is None                  # few classes: all of them
+    big = max(range(1, 201), key=lambda n: shares[n - 1])
+    assert big in keep

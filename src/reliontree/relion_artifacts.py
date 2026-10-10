@@ -18,17 +18,20 @@ def scan_job_artifacts(job_dir):
     except OSError:
         names = []
 
-    state = "unknown"
+    state, from_marker = "unknown", False
     for marker, marker_state in STATE_MARKERS:
         if marker in names:
-            state = marker_state
+            state, from_marker = marker_state, True
             break
     else:
+        # a guess: a job that wrote run.out/run.err and no exit marker. Deposited or copied projects often lack
+        # the markers of finished jobs, so build_tree lets the pipeline's own status label override this guess.
         if any(n.lower() in ("run.out", "run.err") for n in names):
             state = "running"
 
     artifacts = {
         "state": state,
+        "state_from_marker": from_marker,
         "postprocess_map": None,
         "latest_map": None,
         "half_map_1": None,

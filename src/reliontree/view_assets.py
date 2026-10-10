@@ -33,6 +33,8 @@ VIEW_CSS = """
   .job-item .job-label { flex: 1 1 40px; }
   .flag { font-size: 11px; } .lvl-bad { color: #c62828; } .lvl-warn { color: #e65100; } .lvl-info { color: #546e7a; } .lvl-good { color: #2e7d32; }
   .lvl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: currentColor; }
+  .missing-toggle { padding: 6px 12px; font-size: 11px; color: var(--text-muted); cursor: pointer; border-bottom: 1px solid var(--border); }
+  .missing-toggle:hover { background: var(--neutral-bg); }
   .job-item.offpath { opacity: 0.55; }
   #pathPick { max-width: 150px; }
   .drawer .pathbtns { display: flex; gap: 6px; margin: 0 0 10px; }
