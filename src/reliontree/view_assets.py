@@ -31,6 +31,8 @@ VIEW_CSS = """
   .job-item .pick-a { border: 1px solid #1565c0; color: #1565c0; } .job-item .pick-b { border: 1px solid #e65100; color: #e65100; }
   .job-item .pick:hover { color: #fff; } .job-item .pick-a:hover { background: #1565c0; } .job-item .pick-b:hover { background: #e65100; }
   .job-item .job-label { flex: 1 1 40px; }
+  .flag { font-size: 11px; } .lvl-bad { color: #c62828; } .lvl-warn { color: #e65100; } .lvl-info { color: #546e7a; } .lvl-good { color: #2e7d32; }
+  .lvl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: currentColor; }
   .job-item.offpath { opacity: 0.55; }
   #pathPick { max-width: 150px; }
   .drawer .pathbtns { display: flex; gap: 6px; margin: 0 0 10px; }
