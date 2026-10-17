@@ -215,14 +215,17 @@ def test_zero_config_no_project_starts_picker(tmp_path):
     )
     try:
         body = None
-        deadline = time.time() + 5
-        while time.time() < deadline:
+        deadline = time.time() + 90        # a loaded CI runner needs far longer than a laptop to start Python
+        while time.time() < deadline and proc.poll() is None:
             try:
-                body = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=0.5).read().decode()
+                body = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=2).read().decode()
                 break
             except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
-                time.sleep(0.1)
-        assert body is not None, "server never came up"
+                time.sleep(0.2)
+        if body is None:
+            proc.terminate()
+            _out, err = proc.communicate(timeout=10)
+            raise AssertionError("server never came up (exit %s): %s" % (proc.returncode, err[-1500:]))
         assert "no RELION project selected yet" in body
     finally:
         proc.terminate()
