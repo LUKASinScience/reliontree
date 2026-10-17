@@ -6,7 +6,9 @@ import html
 import json
 
 from .view_assets import VIEW_CSS, VIEW_JS
-from .relion_orientation import has_orientation, job_orientation
+from .relion_maps import RANK_MASK, card_maps, list_job_maps
+from .relion_fsc import fsc_curves
+from .relion_orientation import _class_files, has_orientation, job_orientation
 from .relion_treebuild import pick_classes, render_svg, ordered_jobs, job_type, JOB_TYPE_COLORS, DEFAULT_TYPE_COLOR
 from .relion_classes import class_convergence, class_iter_thumbs, SETTLED_CHANGES, TINY_SHARE
 from .relion_export import history_rows, rows_to_csv
@@ -157,7 +159,7 @@ _PAGE = """<!doctype html>
     <button onclick="actualSize()" title="cards at actual size, back to the top">100%</button><button onclick="overview()" title="whole tree on one screen">Overview</button></span>
   {auto_refresh_toggle}
   <span id="updated"></span>
-  <button onclick="openDrawer('browse')" style="margin-left:auto">&#128194; Browse project</button>
+  <button onclick="openDrawer('browse')" style="margin-left:auto">&#128194; Browse project</button>{settings_button}
 </div>
 {scope_banner}
 <div id="pathPanel" hidden></div>
@@ -178,10 +180,12 @@ _PAGE = """<!doctype html>
   </div>
 </div>
 {browse_panel}
+{settings_panel}
 <script>
 const JOBS = {jobs_json};
 const CSV_TEXT = {csv_json};
 const INTERACTIVE = {interactive_json};
+const TOKEN = {token_json};
 const TYPE_COLORS = {type_colors_json};
 const ORIENT = {orient_json};
 
@@ -588,8 +592,88 @@ function classCards(hist, idx, thumbs, flags, job) {{
       (kept === true ? " &middot; <b style='color:#2e7d32'>&#10003; selected</b>" : kept === false ? " &middot; discarded" :
         tiny ? " &middot; nearly empty" : "") + "</div>" +
       "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
-      CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div></div>";
+      CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div>" +
+      (INTERACTIVE && job ? "<button title='open this class map in ChimeraX' onclick='open3d(&quot;" + esc(job) + "&quot;,[&quot;run_it" + String(e.iter).padStart(3, "0") + "_class" + String(i + 1).padStart(3, "0") + ".mrc&quot;],false,this)'>3D</button>" : "") +
+      "</div>";
   }}).join("");
+}}
+// Hand one class map to ChimeraX via the local server (no port is opened in ChimeraX).
+function open3dRequest(job, files, tile) {{
+  return fetch("/open-3d?t=" + encodeURIComponent(TOKEN) + "&job=" + encodeURIComponent(job) +
+    files.map(f => "&f=" + encodeURIComponent(f)).join("") + (tile ? "&tile=1" : "")).then(r => r.json());
+}}
+function open3d(job, files, tile, btn) {{
+  const label = btn.textContent;
+  btn.disabled = true;
+  open3dRequest(job, files, tile)
+    .then(j => {{ btn.title = j.ok || j.error; btn.textContent = j.ok ? "\u2713 " + label : "! " + label; }})
+    .catch(() => {{ btn.textContent = "! " + label; }})
+    .finally(() => {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 2500); }});
+}}
+// "Open in ChimeraX" section of a job's detail drawer: every map the job holds (see relion_maps.py) + angular distributions.
+function maps3dBlock(job, info) {{
+  if (!INTERACTIVE) return "";
+  const btn = (label, files, tile, owner) => "<button style='margin:2px 4px 2px 0' onclick='open3d(&quot;" + esc(owner || job) + "&quot;," +
+    esc(JSON.stringify(files)).replace(/"/g, "&quot;") + "," + tile + ",this)'>" + esc(label) + "</button>";
+  let b = (info.maps || []).map(m => btn(m.label, m.files, m.tile, m.job)).join("");
+  b += (info.bild || []).slice(0, 8).map(f => btn("angdist " + f.replace(/^run(_it\\d+)?(_half\\d)?_/, "").replace("_angdist.bild", ""), [f], "false")).join("");
+  return b ? "<details class=sec open><summary>Open in ChimeraX</summary><p class=note>one ChimeraX window for all clicks; set how it starts under &#9881; Settings</p>" + b + "</details>" : "";
+}}
+// A small "3D" chip (and "Mask" when the job holds or uses one) on the top-right edge of every card that has a map.
+function addCardChips() {{
+  if (!INTERACTIVE) return;
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll("svg .job-card").forEach(el => {{
+    const job = el.dataset.job, specs = (JOBS[job] && JOBS[job].cardmaps) || [];
+    if (!specs.length) return;
+    const x = +el.dataset.x, y = +el.dataset.y, w = +el.dataset.w, h = +el.dataset.h;
+    const labels = specs.map((m, i) => i === 0 ? "3D" : "Mask");
+    const widths = labels.map(t => t.length * 6.5 + 14);
+    let cx = x + w - 6 - widths.reduce((a, b) => a + b + 4, -4);
+    specs.forEach((m, i) => {{
+      const g = document.createElementNS(NS, "g");
+      g.setAttribute("class", "chip3d");
+      g.style.cursor = "pointer";
+      g.innerHTML = "<title>open " + esc(m.label) + (m.files.length > 1 ? " (" + m.files.length + " maps)" : "") + " in ChimeraX</title>" +
+        "<rect x='" + cx + "' y='" + (y - 7) + "' width='" + widths[i] + "' height='15' rx='7.5' stroke='#fff' stroke-width='1.5' fill='" + (i === 0 ? "#1565c0" : "#6a1b9a") + "'/>" +
+        "<text x='" + (cx + widths[i] / 2) + "' y='" + (y + 3.5) + "' fill='#fff' font-size='10' font-weight='bold' text-anchor='middle'>" + labels[i] + "</text>";
+      ["click", "mousedown", "mouseup"].forEach(ev => g.addEventListener(ev, e => e.stopPropagation()));
+      g.addEventListener("click", () => {{
+        const t = g.querySelector("text");
+        t.textContent = "\u2026";
+        open3dRequest(m.job || job, m.files, m.tile).then(j => {{ g.querySelector("title").textContent = j.ok || j.error; t.textContent = j.ok ? "\u2713" : "!"; }})
+          .catch(() => {{ t.textContent = "!"; }}).finally(() => setTimeout(() => {{ t.textContent = labels[i]; }}, 2500));
+      }});
+      el.appendChild(g);
+      cx += widths[i] + 4;
+    }});
+  }});
+}}
+// Settings drawer: how to start ChimeraX when none with a reliontree listener is running (path, shell snippet such as module load).
+function settingsPost(body) {{
+  body.t = TOKEN;
+  return fetch("/settings", {{method: "POST", headers: {{"Content-Type": "application/json"}}, body: JSON.stringify(body)}}).then(r => r.json());
+}}
+function fillSettings(j) {{
+  if (j.error) {{ document.getElementById("setOut").textContent = j.error; return; }}
+  document.getElementById("setCmd").value = j.settings.chimerax_cmd;
+  document.getElementById("setPre").value = j.settings.prelaunch;
+  document.getElementById("setTpl").value = j.settings.figure_template || "";
+  document.getElementById("setCmd").placeholder = j.auto ? "empty = " + j.auto : "empty = auto-detect (none found on this machine)";
+  document.getElementById("setListener").textContent = j.listener ? "A ChimeraX with a listener is connected: clicks go to it."
+    : (j.starting ? "ChimeraX was just started and is coming up." : "No ChimeraX with a listener is running: the next click starts one (with reliontree\\'s own listener).");
+}}
+function openSettings() {{ openDrawer("settings"); document.getElementById("setOut").textContent = ""; fetch("/settings?t=" + encodeURIComponent(TOKEN)).then(r => r.json()).then(fillSettings); }}
+function saveSettings() {{
+  settingsPost({{chimerax_cmd: document.getElementById("setCmd").value, prelaunch: document.getElementById("setPre").value, figure_template: document.getElementById("setTpl").value}})
+    .then(j => {{ fillSettings(j); if (!j.error) document.getElementById("setOut").textContent = "Saved."; }});
+}}
+function checkSettings() {{
+  const out = document.getElementById("setOut");
+  out.textContent = "Checking (runs 'Run first' and ChimeraX --version, up to 60 s)\u2026";
+  settingsPost({{chimerax_cmd: document.getElementById("setCmd").value, prelaunch: document.getElementById("setPre").value, figure_template: document.getElementById("setTpl").value}})
+    .then(j => {{ if (j.error) {{ out.textContent = j.error; return null; }} return fetch("/settings-check?t=" + encodeURIComponent(TOKEN)).then(r => r.json()); }})
+    .then(j => {{ if (j) out.textContent = (j.ok ? "OK\\n" : "FAILED\\n") + j.text; }}).catch(e => {{ out.textContent = String(e); }});
 }}
 
 // Slider over iterations (watch mode: thumbnails are fetched per iteration
@@ -715,12 +799,14 @@ function selectJob(job) {{
     (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
       "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
     "<div class=chips>" + chips.join("") + "</div>" +
+    classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
     orientationSection(job, info) +
+    fscSection(info) +
+    maps3dBlock(job, info) +
     (info.annotations.length ? "<details class=sec open><summary>Notes from tools</summary>" + info.annotations.map(a =>
       "<p style='margin:6px 0'><span class='lvl-dot lvl-" + a.level + "'></span><b>" + esc(a.label) + "</b> <span class=note>" + esc(a.source) + "</span>" +
       (a.detail ? "<br><span style='font-size:12px'>" + esc(a.detail) + "</span>" : "") + "</p>").join("") + "</details>" : "") +
     (info.notes ? "<details class=sec open><summary>Notes</summary><p style='white-space:pre-wrap;margin:4px 0'>" + esc(info.notes) + "</p></details>" : "") +
-    classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
     "<details class=sec open><summary>Lineage</summary>" +
     "<p class=note>Parents: " + (info.parents.map(esc).join(", ") || "(none)") + "</p>" +
     "<button class='why-btn' onclick=\\"showWhy('" + q + "')\\">What changed vs. parent job? &rarr;</button></details>" +
@@ -800,6 +886,7 @@ document.querySelectorAll(".job-card").forEach(el => {{
   el.addEventListener("mouseleave", () => highlight(pinned));
 }});
 
+addCardChips();
 // Deep link: #Class3D/job004 opens that job's drawer.
 document.querySelectorAll(".mask-chip").forEach(el => el.addEventListener("click", e => {{ e.stopPropagation(); selectJob(el.dataset.job); }}));
 {view_js}
@@ -824,6 +911,31 @@ setInterval(tickUpdated, 1000);
 </html>
 """
 
+
+_SETTINGS_BUTTON = """<button onclick="openSettings()" title="how ChimeraX is started for the 3D buttons">&#9881; Settings</button>"""
+
+_SETTINGS_PANEL = """<div id="settings" class="drawer">
+  <button class="close-btn" onclick="closeDrawers()">&times;</button>
+  <h2>Settings</h2>
+  <details class="sec" open><summary>ChimeraX for the 3D buttons</summary>
+  <p class="note">Used only when no ChimeraX with a listener is running. reliontree then starts one with its own listener
+  (no InstantMap needed), so every later click opens its maps in that same window. For a ChimeraX you already have open,
+  run <code>instantmap listen</code> or <code>runscript</code> with the path from <code>reliontree listener-path</code>. These lines run on the
+  machine where reliontree runs; on a cluster that needs a display (for example <code>ssh -X</code>). Quote paths with spaces.</p>
+  <p style="margin:8px 0 2px"><b>ChimeraX command</b></p>
+  <input id="setCmd" type="text" style="width:100%;box-sizing:border-box" spellcheck="false">
+  <p style="margin:10px 0 2px"><b>Run first</b> <span class="note">(shell, e.g. <code>module load chimerax</code>)</span></p>
+  <textarea id="setPre" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace" spellcheck="false"
+            placeholder="module load chimerax"></textarea>
+  <p style="margin:10px 0 2px"><b>FigureStyle template</b> <span class="note">(optional, e.g. <code>Cryo-EM Publication Surface</code>)</span></p>
+  <input id="setTpl" type="text" style="width:100%;box-sizing:border-box" spellcheck="false" placeholder="empty = open maps as they are">
+  <p class="note">Applied to the maps of each 3D click: the first map becomes the template's map, the second its second map (mask, half map).
+  Needs the FigureStyle bundle (1.2 or newer, local version) in that ChimeraX; without it the maps still open.</p>
+  <p style="margin:10px 0"><button onclick="saveSettings()">Save</button> <button onclick="checkSettings()">Check</button></p>
+  <pre id="setOut" style="white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto"></pre>
+  <p id="setListener" class="note"></p>
+  </details>
+</div>"""
 
 _NO_BROWSE_PANEL = """<div id="browse" class="drawer">
 <button class="close-btn" onclick="closeDrawers()">&times;</button>
@@ -862,7 +974,7 @@ def _js(obj):
 
 
 def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html=None,
-                 selected_job=None, interactive=False):
+                 selected_job=None, interactive=False, token=""):
     """A single self-contained HTML string embedding the SVG tree plus a
     click-to-browse sidebar: a filterable job list and a detail panel
     (state, resolution, particle count, parents, job options) driven by
@@ -897,6 +1009,14 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
     else:
         scope_banner = ""
     jobs = {}
+    _maps_of = {j: (list_job_maps(tree["job_dirs"][j]) if interactive else []) for j in ordered_jobs(tree)}
+    for j in list(_maps_of):          # masks this job USES live in the MaskCreate job's folder: offer them here too
+        for mask_job in tree.get("chips", {}).get(j, [])[:3]:
+            if mask_job in tree["job_dirs"] and mask_job != j:
+                own = [m for m in list_job_maps(tree["job_dirs"][mask_job]) if m["rank"] == RANK_MASK][:1]
+                label = "Mask (%s)" % (tree.get("alias", {}).get(mask_job) or mask_job.split("/")[-1])
+                _maps_of[j] = _maps_of[j] + [dict(m, label=label, job=mask_job) for m in own]
+        _maps_of[j].sort(key=lambda m: m["rank"])
     for job in sorted(ordered_jobs(tree), key=lambda j: (int(j.rsplit("job", 1)[-1]) if j.rsplit("job", 1)[-1].isdigit() else 0, j)):  # chronological
         artifacts = tree["artifacts"].get(job, {})
         stats = tree["stats"].get(job, {})
@@ -910,6 +1030,8 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "chips": tree["chips"].get(job, []),
             "annotations": tree.get("annotations", {}).get(job, []),
             "orient": has_orientation(tree["job_dirs"][job]),
+            "fsc": fsc_curves(tree["job_dirs"][job]) if job_type(job) in ("PostProcess", "Refine3D") else None,
+            "maps": _maps_of[job], "cardmaps": card_maps(_maps_of[job]), "bild": [p.name for _, p in sorted(_class_files(tree["job_dirs"][job]).items())],
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "n_particles": stats.get("n_particles"),
             "runtime_seconds": stats.get("runtime_seconds"),
@@ -939,6 +1061,9 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
         auto_refresh_seconds=refresh_seconds or 0,
         scope_banner=scope_banner,
         interactive_json=json.dumps(bool(interactive)),
+        token_json=json.dumps(token if interactive else ""),
+        settings_button=_SETTINGS_BUTTON if interactive else "",
+        settings_panel=_SETTINGS_PANEL if interactive else "",
         view_css=VIEW_CSS, view_js=VIEW_JS,
         settled=SETTLED_CHANGES, tiny=TINY_SHARE,
         type_colors_json=_js(type_colors),

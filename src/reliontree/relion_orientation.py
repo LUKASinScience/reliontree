@@ -9,6 +9,9 @@ import math
 import re
 from pathlib import Path
 
+MAX_STAR_BYTES = 400 * 1024 * 1024   # larger particle tables are not read on a page request
+BIN_DEGREES = 6.0
+
 _CYL = re.compile(r"^\.cylinder\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+\S+\s*$", re.MULTILINE)
 
 
@@ -76,12 +79,85 @@ def _class_files(job_dir):
     return {n: p for n, (_, p) in found.items()}
 
 
+def _final_particles_star(job_dir):
+    """run_data.star of a finished job, else the newest run_itNNN_data.star; None if absent or too large."""
+    d = Path(job_dir)
+    final = d / "run_data.star"
+    if final.is_file():
+        found = final
+    else:
+        its = sorted(d.glob("run_it*_data.star"))
+        found = its[-1] if its else None
+    try:
+        return found if found is not None and found.stat().st_size <= MAX_STAR_BYTES else None
+    except OSError:
+        return None
+
+
+def orientation_from_particles(star_path, class_number=None):
+    """Angular distribution from the particle table itself (`_rlnAngleRot`, `_rlnAngleTilt`, optionally one
+    `_rlnClassNumber`), for jobs that have no `*_angdist.bild`. Directions follow RELION's convention
+    (x = sin(tilt) cos(rot), y = sin(tilt) sin(rot), z = cos(tilt)); particles are counted in 6-degree bins and each
+    count is divided by the bin's solid angle, so the poles do not look busier than the equator. Same output as
+    parse_bild: [(x, y, z, weight)], weight relative to the densest bin."""
+    counts = {}
+    cols = None
+    in_particles = False
+    try:
+        with open(star_path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if cols is None:
+                    if s.lower().startswith("data_"):
+                        in_particles = s.lower() in ("data_particles", "data_images")
+                    elif in_particles and s.lower() == "loop_":
+                        cols = []
+                    continue
+                if s.startswith("_"):
+                    cols.append(s.split()[0])
+                    continue
+                if s.lower().startswith("data_") or s.lower() == "loop_":
+                    break
+                if "_rlnAngleRot" not in cols or "_rlnAngleTilt" not in cols:
+                    return []
+                ir, it_ = cols.index("_rlnAngleRot"), cols.index("_rlnAngleTilt")
+                ic = cols.index("_rlnClassNumber") if "_rlnClassNumber" in cols else None
+                parts = s.split()
+                if len(parts) < len(cols):
+                    continue
+                if class_number is not None and ic is not None and int(float(parts[ic])) != class_number:
+                    continue
+                try:
+                    rot, tilt = float(parts[ir]) % 360.0, float(parts[it_])
+                except ValueError:
+                    continue
+                key = (int(rot // BIN_DEGREES), min(int(max(0.0, min(180.0, tilt)) // BIN_DEGREES), int(180 // BIN_DEGREES) - 1))
+                counts[key] = counts.get(key, 0) + 1
+    except OSError:
+        return []
+    out, best = [], 0.0
+    for (ri, ti), n in counts.items():
+        rot = math.radians((ri + 0.5) * BIN_DEGREES)
+        tilt = math.radians((ti + 0.5) * BIN_DEGREES)
+        density = n / max(math.sin(tilt), 0.05)
+        out.append((math.sin(tilt) * math.cos(rot), math.sin(tilt) * math.sin(rot), math.cos(tilt), density))
+        best = max(best, density)
+    return [(x, y, z, w / best) for x, y, z, w in out] if best > 0 and len(out) >= 4 else []
+
+
 def job_orientation(job_dir, class_number=None):
     """{"classes": [numbers], "class": n, "source": filename, "bins": [[x, y, z, weight], ...]} or None.
     Directions are unit vectors in the reference's frame (the one RELION's bild uses), weights relative to the busiest bin."""
     files = _class_files(job_dir)
     if not files:
-        return None
+        star = _final_particles_star(job_dir)
+        bins = orientation_from_particles(star, class_number) if star is not None else []
+        if not bins:
+            return None
+        return {"classes": [], "class": class_number, "source": star.name + " (particle angles)",
+                "bins": [[round(x, 3), round(y, 3), round(z, 3), round(w, 3)] for x, y, z, w in bins]}
     number = class_number if class_number in files else min(files)
     try:
         bins = parse_bild(files[number].read_text(encoding="utf-8", errors="ignore"))
@@ -96,6 +172,6 @@ def job_orientation(job_dir, class_number=None):
 def has_orientation(job_dir):
     """Cheap check (no parsing): does this job have any angular-distribution file?"""
     try:
-        return next(Path(job_dir).glob("run*_angdist.bild"), None) is not None
+        return next(Path(job_dir).glob("run*_angdist.bild"), None) is not None or _final_particles_star(job_dir) is not None
     except OSError:
         return False

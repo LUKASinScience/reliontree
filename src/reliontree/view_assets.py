@@ -371,6 +371,27 @@ function orientationSource(job) {
   }
   return null;
 }
+function fscSection(info) {
+  const f = info.fsc;
+  if (!f || !f.x || f.x.length < 2) return "";
+  const W = 300, H = 180, L = 34, R = 10, T = 10, B = 30, xmax = f.x[f.x.length - 1];
+  const X = v => L + (v / xmax) * (W - L - R), Y = v => T + (1.05 - Math.max(-0.05, Math.min(1.05, v))) / 1.1 * (H - T - B);
+  const colors = ["#1565c0", "#e65100", "#2e7d32", "#8d6e63"];
+  let g = "";
+  [0, 0.5, 1].forEach(v => { g += "<line x1='" + L + "' x2='" + (W - R) + "' y1='" + Y(v) + "' y2='" + Y(v) + "' stroke='#ddd'/><text x='" + (L - 4) + "' y='" + (Y(v) + 3) + "' font-size='9' text-anchor='end' fill='#666'>" + v + "</text>"; });
+  [10, 6, 4, 3, 2.5, 2, 1.5].forEach(a => { if (1 / a <= xmax) g += "<line x1='" + X(1 / a) + "' x2='" + X(1 / a) + "' y1='" + (H - B) + "' y2='" + (H - B + 3) + "' stroke='#666'/><text x='" + X(1 / a) + "' y='" + (H - B + 13) + "' font-size='9' text-anchor='middle' fill='#666'>" + a + "</text>"; });
+  g += "<text x='" + ((L + W - R) / 2) + "' y='" + (H - 3) + "' font-size='9' text-anchor='middle' fill='#666'>resolution (&Aring;)</text>";
+  g += "<line x1='" + L + "' x2='" + (W - R) + "' y1='" + Y(f.threshold) + "' y2='" + Y(f.threshold) + "' stroke='#c62828' stroke-dasharray='4 3'/><text x='" + (W - R) + "' y='" + (Y(f.threshold) - 3) + "' font-size='9' text-anchor='end' fill='#c62828'>" + f.threshold + "</text>";
+  if (f.resolution && 1 / f.resolution <= xmax) g += "<line x1='" + X(1 / f.resolution) + "' x2='" + X(1 / f.resolution) + "' y1='" + T + "' y2='" + (H - B) + "' stroke='#c62828' stroke-dasharray='2 3'/>";
+  f.curves.forEach((c, k) => {
+    let d = "", pen = false;
+    c.y.forEach((v, i) => { if (v === null) { pen = false; return; } d += (pen ? "L" : "M") + X(f.x[i]).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+    g += "<path d='" + d + "' fill='none' stroke='" + colors[k % colors.length] + "' stroke-width='" + (k === 0 ? 2 : 1.2) + "'/>";
+  });
+  const legend = f.curves.map((c, k) => "<span style='color:" + colors[k % colors.length] + "'>&#9632;</span> " + esc(c.label)).join(" &nbsp; ");
+  return "<details class=sec open><summary>Resolution (FSC)</summary><svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-width:340px;background:#fff;border:1px solid var(--border);border-radius:6px'>" + g + "</svg>" +
+    "<p class=note style='margin:4px 0'>" + legend + "<br>" + (f.resolution ? "crosses " + f.threshold + " at <b>" + f.resolution.toFixed(2) + " &Aring;</b> (interpolated; RELION reports the shell value, up to one shell different) &middot; " : "") + "from " + esc(f.source) + "</p></details>";
+}
 function orientationSection(job, info) {
   if (info.orient) return "<details class=sec open><summary>Orientations</summary><div id=globeBox class=note>loading&hellip;</div></details>";
   if (!["Class3D", "Refine3D"].includes(jobType(job)) || info.state === "missing") return "";

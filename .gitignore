@@ -41,3 +41,6 @@ state/
 # Onboarding PDFs (sent directly, not part of the repo)
 CONTRIBUTING-images-guide.pdf
 INSTALLING-and-debugging-guide.pdf
+
+# Local release notes (not published)
+CHANGELOG.md

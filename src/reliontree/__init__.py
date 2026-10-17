@@ -25,7 +25,14 @@ from .relion_methods import draft_methods_paragraph
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .render_html import render_html
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
+
+
+def start_background(project, port=8710, interval=10):
+    """Serve the live view of `project` from a thread of this process; returns an object with .url, .alive(), .stop()."""
+    from .cli import start_background as _start
+    return _start(project, port, interval)
+
 
 __all__ = [
     "__version__",
@@ -42,4 +49,5 @@ __all__ = [
     "diff_options",
     "diff_many_options",
     "job_context",
+    "start_background",
 ]

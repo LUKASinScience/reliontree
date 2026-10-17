@@ -4,6 +4,8 @@ One job, one cheese, one relentless mouse. Welcome to reliontree  — the map of
 
 ![the mouse's hunting journey across a job tree](docs/assets/mouse-hunt.gif)
 
+Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
+
 ## Why "reliontree"
 
 In relion, the mouse cursor hunts down exactly one piece of cheese per
@@ -17,7 +19,6 @@ local server.
 
 ![reliontree — live browsing demo](docs/assets/demo.gif)
 
-Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
 
 Works on a workstation, an HPC login node (no X11, no root),
 or a cloud VM, with the same single command.
@@ -56,6 +57,10 @@ reliontree table . --format csv -o jobs.csv   # job table for a supplement
 reliontree methods .                          # draft methods-paragraph, one line per job
 reliontree diff --job Refine3D/job039 --job Refine3D/job042   # 2+ jobs' changed/varying options
 reliontree why --job Refine3D/job042          # parent, siblings, what changed from the parent
+reliontree compare --job Refine3D/job039 --job Refine3D/job042   # options + resolution/particles/maps + class overlap
+reliontree maps --job Refine3D/job042         # which maps a job holds
+reliontree open --job Refine3D/job042 --map mask   # open in the one ChimeraX window
+reliontree settings --run-first "module load chimerax" --check
 reliontree analyze                            # optional: relion-origin checks -> pills on the job cards
 reliontree plan plan.json                     # dry run: new jobs as diffs against existing ones; --apply registers them as Scheduled (needs relion_pipeliner)
 reliontree overlap Class3D/job008 Class3D/job009   # particle overlap matrix between two classifications
@@ -90,6 +95,41 @@ More in the live view:
 Exit codes for the `tree`/`table`/`methods`/`diff`/`why` subcommands (for scripting):
 `0` ok, `1` no RELION project found, `2`
 parse/job-lookup error.
+
+## Open maps in ChimeraX (3D buttons)
+
+In the live view (`reliontree watch`) every job card that holds a map has a blue **3D** chip on its top-right edge, plus a
+purple **Mask** chip when the job holds or uses a mask. This is not limited to classification: Refine3D, PostProcess,
+MaskCreate, LocalRes, Reconstruct, InitialModel and any other job with a `.mrc`/`.map` in its folder get one. The job
+detail has an **Open in ChimeraX** section with every map of the job (final map, post-processed, half maps, masks, all
+classes side by side, other maps) and the angular distributions; each class card keeps its own **3D** button.
+
+**One ChimeraX window for everything.** The first click starts ChimeraX with reliontree's own listener script (no
+InstantMap needed); every later click, also while it is still starting, is handed to that same window. To use a ChimeraX
+you already have open, run `runscript <path printed by "reliontree listener-path">` there (or
+`instantmap listen` with the optional ChimeraX-InstantMap plugin).
+ChimeraX itself is required for the 3D buttons; the InstantMap plugin is optional.
+
+**Settings (gear button).** If `chimerax` is not on your PATH, or you are on a cluster, set how ChimeraX is started: the
+command, and an optional *Run first* line such as `module load chimerax`. They are stored in `~/.reliontree/settings.json`
+(owner-only) and used only when no listening ChimeraX is running. **Check** runs *Run first* and `ChimeraX --version`.
+The lines run on the machine where reliontree runs, so on a cluster you need a display (for example `ssh -X`).
+
+**Safety.** The two programs talk through a private folder (`~/.reliontree/chimerax`, owner-only); no network port is
+opened on the ChimeraX side, and the listener only ever runs `open <map>` (and `tile`) for existing `.mrc`/`.map`/`.bild`
+files you own. The settings contain a command that is run by your shell, so the server answers those requests only when
+they come from its own page (per-run token plus Host/Origin check); another web page you have open cannot change them or
+trigger a launch. (ChimeraX's built-in REST, `remotecontrol rest start`, has no access token, which is why it is not used.)
+
+## Ask an AI assistant about your project (MCP, read-only)
+
+`reliontree mcp /path/to/project` is a small [MCP](https://modelcontextprotocol.io) server over standard input/output
+(standard library only, no extra install). It answers "which job produced this map?", "what changed between these two
+refinements?" and "draft the methods" from the project's own files. Six tools: `list_jobs`, `job_info`, `lineage`, `why`,
+`diff`, `methods`. It is read-only: it cannot run, start or change RELION jobs, it is fixed to the one project directory,
+validates job ids and never returns absolute paths. For Claude Code:
+`claude mcp add reliontree -- reliontree mcp /path/to/project`; for other clients use
+`{"command": "reliontree", "args": ["mcp", "/path/to/project"]}`.
 
 ## Testing
 
@@ -215,13 +255,13 @@ plugin's RELION History tab — extracted into its own package since it
 never needed ChimeraX to begin with. Homepage:
 [github.com/LUKASinScience/ChimeraX-InstantMap](https://github.com/LUKASinScience/ChimeraX-InstantMap).
 
-## Contributors
+## Authors
 
 - Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
+- Serhat Dönmez ([serhatdonmez98-cmd](https://github.com/serhatdonmez98-cmd)) — co-author;
+  concept, screenshots and demo GIF for the README/docs
 - Claude Code (Anthropic) — AI pair-programming assistant, wrote and
   reviewed a substantial part of this codebase alongside Lukas
-- Serhat Dönmez ([serhatdonmez98-cmd](https://github.com/serhatdonmez98-cmd)) —
-  concept, screenshots and demo GIF for the README/docs
 
 ## License
 

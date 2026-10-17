@@ -14,6 +14,8 @@ browser -- see `reliontree` with no subcommand below).
     reliontree methods /path/to/project
     reliontree diff --job Refine3D/job039 --job Refine3D/job042
     reliontree why --job Refine3D/job042
+    reliontree compare --job Refine3D/job039 --job Refine3D/job042 [--format json]
+    reliontree maps --job Refine3D/job042 ; reliontree open --job Refine3D/job042 --map mask
     reliontree watch /path/to/project            # live-refreshing local view, stdlib http.server only
 
 Exit codes (tree/table/methods/diff/why subcommands): 0 ok, 1 no RELION project found, 2 parse/job-lookup error.
@@ -24,14 +26,17 @@ import html
 import json
 import os
 import re
+import secrets
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from . import chimerax_bridge
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .relion_classes import class_iter_thumbs, class_overlap
+from .relion_maps import list_job_maps
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
@@ -127,6 +132,116 @@ def cmd_diff(args):
         if not result["varying"]:
             lines.append("  (none -- all identical)")
         _write("\n".join(lines), args.out)
+
+
+def _job_summary(tree, job, project):
+    """One row per job for `compare`: what the browser's compare view shows at a glance."""
+    art = tree["artifacts"].get(job) or {}
+    st = tree["stats"].get(job) or {}
+    return {"job": job, "type": job.split("/")[0], "state": art.get("state", "unknown"),
+            "parents": sorted(tree["parents"].get(job, ())), "resolution_angstrom": st.get("resolution_angstrom"),
+            "n_particles": st.get("n_particles"),
+            "maps": [{"label": m["label"], "files": m["files"]} for m in list_job_maps(project / job)]}
+
+
+def cmd_compare(args):
+    """Everything about 2+ jobs side by side: state/resolution/particles, changed options, maps, and (two
+    classification jobs) the particle overlap. The command-line twin of the browser's compare view."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    tree = build_tree(project)
+    jobs = args.job
+    missing = [j for j in jobs if j not in tree["options"]]
+    if missing:
+        raise ValueError("job(s) not found in pipeline: %s" % ", ".join(missing))
+    out = {"jobs": [_job_summary(tree, j, project) for j in jobs]}
+    out["options"] = (diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]]) if len(jobs) == 2
+                      else diff_many_options({j: tree["options"][j] for j in jobs}))
+    out["overlap"] = None
+    if len(jobs) == 2 and all(j.split("/")[0] in ("Class2D", "Class3D") for j in jobs):
+        ov = class_overlap(project / jobs[0], project / jobs[1])
+        if ov is not None:
+            out["overlap"] = {"classes_a": ov["classes_a"], "classes_b": ov["order_b"], "score": ov["score"],
+                              "counts": {"%d,%d" % k: v for k, v in ov["counts"].items()}}
+    if args.format == "json":
+        _write(json.dumps(out, indent=2), args.out)
+        return
+    lines = ["%-26s %-10s %-10s %10s %12s  %s" % ("job", "type", "state", "res (A)", "particles", "maps")]
+    for r in out["jobs"]:
+        res = "%.1f" % r["resolution_angstrom"] if r["resolution_angstrom"] else "-"
+        lines.append("%-26s %-10s %-10s %10s %12s  %s" % (r["job"], r["type"], r["state"], res,
+                     "{:,}".format(r["n_particles"]) if r["n_particles"] else "-", ", ".join(m["label"] for m in r["maps"]) or "-"))
+    lines.append("")
+    if len(jobs) == 2:
+        lines.append("Changed options:")
+        for key, (a, b) in sorted(out["options"]["changed"].items()):
+            lines.append("  %-30s %s -> %s" % (key, a, b))
+        if not out["options"]["changed"]:
+            lines.append("  (none -- identical options)")
+    else:
+        lines.append("Varying options:")
+        for key, values in sorted(out["options"]["varying"].items()):
+            lines.append("  %s" % key)
+            for j in jobs:
+                lines.append("    %-28s %s" % (j, values.get(j)))
+        if not out["options"]["varying"]:
+            lines.append("  (none -- all identical)")
+    if out["overlap"]:
+        ov = out["overlap"]
+        lines += ["", "Particle overlap (rows = %s class, columns = %s class; %.0f%% on the diagonal):" % (jobs[0], jobs[1], ov["score"] * 100),
+                  "      " + "".join("%8d" % b for b in ov["classes_b"])]
+        for a in ov["classes_a"]:
+            lines.append("%5d " % a + "".join("%8d" % ov["counts"].get("%d,%d" % (a, b), 0) for b in ov["classes_b"]))
+    _write("\n".join(lines), args.out)
+
+
+def cmd_maps(args):
+    """The maps a job holds, as the 3D buttons group them (label + file names)."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    if not _JOB_ID.fullmatch(args.job):
+        raise ValueError("bad job id %r" % args.job)
+    maps = list_job_maps(project / args.job)
+    if args.format == "json":
+        _write(json.dumps({"job": args.job, "maps": maps}, indent=2), args.out)
+        return
+    _write("\n".join("%-28s %s" % (m["label"], ", ".join(m["files"])) for m in maps) or "(no maps in %s)" % args.job, args.out)
+
+
+def cmd_open(args):
+    """Open a job's maps in the ONE ChimeraX that reliontree talks to (starts it if none runs) -- the 3D button, from the shell.
+    --map picks an entry by its label (see `reliontree maps`); default: the most important one."""
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    if not _JOB_ID.fullmatch(args.job):
+        raise ValueError("bad job id %r" % args.job)
+    maps = list_job_maps(project / args.job)
+    if not maps:
+        raise ValueError("no maps in %s" % args.job)
+    if args.map:
+        picked = [m for m in maps if args.map.lower() in m["label"].lower()]
+        if not picked:
+            raise ValueError("no map entry matching %r; available: %s" % (args.map, ", ".join(m["label"] for m in maps)))
+        entry = picked[0]
+    else:
+        entry = maps[0]
+    for n in entry["files"]:
+        if not _MAP_FILE.fullmatch(n):
+            raise ValueError("bad file name %r" % n)
+    msg = chimerax_bridge.open_files([project / args.job / n for n in entry["files"]], tile=entry["tile"] and not args.no_tile,
+                                     style=args.template)
+    print("%s: %s" % (entry["label"], msg))
+
+
+def cmd_settings(args):
+    """Show the ChimeraX settings; set them with --chimerax / --run-first / --template; --check runs ChimeraX --version."""
+    new = {k: v for k, v in (("chimerax_cmd", args.chimerax), ("prelaunch", args.run_first), ("figure_template", args.template)) if v is not None}
+    if new:
+        chimerax_bridge.save_settings(new)
+    info = chimerax_bridge.describe()
+    if args.check:
+        ok, text = chimerax_bridge.check_settings()
+        info["check"] = {"ok": ok, "text": text}
+    print(json.dumps(info, indent=2))
+    if args.check and not info["check"]["ok"]:
+        raise SystemExit(2)
 
 
 def cmd_analyze(args):
@@ -312,6 +427,25 @@ def _render_picker_page(browse_dir, error=None):
 _JOB_ID = re.compile(r"[A-Za-z0-9_]+/job\d+")
 
 
+_MAP_FILE = re.compile(r"[\w.\-]+\.(?:mrc|map|bild)", re.IGNORECASE)
+
+
+def _open_3d(query, project):
+    """Open map/.bild files of one job in ChimeraX. The page names files by basename only (`f=`, repeatable);
+    the path is built here from a validated job id, so nothing outside the job directory can be reached."""
+    try:
+        job = query.get("job", [""])[0].rstrip("/")
+        if not _JOB_ID.fullmatch(job):
+            raise ValueError("bad job id %r" % job)
+        names = query.get("f", [])
+        if not names or any(not _MAP_FILE.fullmatch(n) for n in names):
+            raise ValueError("bad file name")
+        paths = [project / job / n for n in names]
+        return {"ok": chimerax_bridge.open_files(paths, tile=query.get("tile", [""])[0] == "1")}
+    except (ValueError, KeyError) as exc:
+        return {"error": str(exc)}
+
+
 def _api(route, query, project):
     """JSON for the page's lazy requests: per-iteration class thumbnails and
     two-job particle overlap. Job ids are matched against a strict pattern
@@ -339,7 +473,15 @@ def _api(route, query, project):
         return {"error": str(exc)}
 
 
-def cmd_watch(args):
+def cmd_mcp(args):
+    from .mcp_server import serve
+    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    serve(project)
+
+
+def make_server(args):
+    """Build (not start) the live-view server for `args` (project, port, interval, job, max_hops); returns (server, url).
+    cmd_watch serves it in the foreground, `start_background` in a thread (how CryoSTAR-Base embeds it)."""
     """Stdlib-only live view: regenerates the tree HTML on every request
     (auto-refresh meta tag drives the browser reload) — no Flask/Streamlit,
     no persistent background process beyond this one server. A right-hand
@@ -356,8 +498,44 @@ def cmd_watch(args):
         except ProjectNotFoundError:
             project = None
     state = {"project": project}
+    # Changing settings or opening ChimeraX can run a shell command on this machine, so those routes only answer
+    # requests that carry this per-run token (embedded in our own page, unreadable for other sites: no CORS headers)
+    # AND arrive with our own Host/Origin (blocks DNS rebinding and cross-site forms).
+    page_token = secrets.token_urlsafe(16)
+    own_hosts = ("127.0.0.1:%d" % args.port, "localhost:%d" % args.port)
 
     class Handler(BaseHTTPRequestHandler):
+        def _authorized(self, token):
+            origin = self.headers.get("Origin")
+            return (self.headers.get("Host", "") in own_hosts
+                    and (origin is None or origin in ["http://" + h for h in own_hosts])
+                    and secrets.compare_digest(str(token or ""), page_token))
+
+        def _deny(self):
+            self._json({"error": "forbidden (open this page from the reliontree server itself)"}, status=403)
+
+        def do_POST(self):
+            try:
+                if urlsplit(self.path).path != "/settings":
+                    self._json({"error": "not found"}, status=404)
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 20000 or "application/json" not in self.headers.get("Content-Type", ""):
+                    self._json({"error": "expected a small JSON body"}, status=400)
+                    return
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(body, dict) or not self._authorized(body.get("t")):
+                    self._deny()
+                    return
+                try:
+                    chimerax_bridge.save_settings(body)
+                except ValueError as exc:
+                    self._json({"error": str(exc)})
+                    return
+                self._json(chimerax_bridge.describe())
+            except (ValueError, OSError) as exc:
+                self._json({"error": str(exc)})
+
         def do_GET(self):
             try:
                 query = parse_qs(urlsplit(self.path).query)
@@ -374,6 +552,18 @@ def cmd_watch(args):
                     return
 
                 route = urlsplit(self.path).path
+                if route in ("/open-3d", "/settings", "/settings-check"):
+                    if not self._authorized(query.get("t", [""])[0]):
+                        self._deny()
+                        return
+                    if route == "/settings":
+                        self._json(chimerax_bridge.describe())
+                    elif route == "/settings-check":
+                        ok, text = chimerax_bridge.check_settings()
+                        self._json({"ok": ok, "text": text})
+                    elif state["project"] is not None:
+                        self._json(_open_3d(query, state["project"]))
+                    return
                 if route in ("/class-thumbs", "/overlap", "/orientation") and state["project"] is not None:
                     self._json(_api(route, query, state["project"]))
                     return
@@ -405,7 +595,7 @@ def cmd_watch(args):
                     tree = build_tree(state["project"], selected=None, max_hops=None)
                 browse_html = _render_browse_panel(browse_dir, state["project"], error,
                                                      start_open=("browse" in query or "open" in query))
-                page = render_html(tree, title=str(state["project"]),
+                page = render_html(tree, title=str(state["project"]), token=page_token,
                                     refresh_seconds=args.interval, browse_html=browse_html,
                                     selected_job=selected_job, interactive=True)
                 body = page.encode("utf-8")
@@ -419,9 +609,9 @@ def cmd_watch(args):
                 self.end_headers()
                 self.wfile.write(str(exc).encode("utf-8"))
 
-        def _json(self, payload):
+        def _json(self, payload, status=None):
             body = json.dumps(payload).encode("utf-8")
-            self.send_response(200 if "error" not in payload else 400)
+            self.send_response(status or (200 if "error" not in payload else 400))
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -430,11 +620,43 @@ def cmd_watch(args):
         def log_message(self, format, *a):
             pass  # keep stdout clean; errors still surface via the page
 
-    url = "http://127.0.0.1:%d/" % args.port
+    return ThreadingHTTPServer(("127.0.0.1", args.port), Handler), "http://127.0.0.1:%d/" % args.port
+
+
+def cmd_watch(args):
+    server, url = make_server(args)
     print("reliontree watch: %s (refreshing every %ds, Ctrl-C to stop)" % (url, args.interval))
     if not args.no_open:
         webbrowser.open(url)
-    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    server.serve_forever()
+
+
+class BackgroundServer:
+    """The live view served from a thread of the calling process (no subprocess, no PATH lookup). `stop()` frees the port."""
+
+    def __init__(self, server, url):
+        import threading
+        self.server, self.url = server, url
+        self.thread = threading.Thread(target=server.serve_forever, name="reliontree-view", daemon=True)
+        self.thread.start()
+
+    def alive(self):
+        return self.thread.is_alive()
+
+    def stop(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=3)
+
+
+def start_background(project, port=8710, interval=10):
+    """Start the read-only live view of one RELION project in a background thread and return a BackgroundServer.
+    Raises OSError if the port is busy and ValueError if `project` has no default_pipeline.star."""
+    project = Path(project)
+    if not (project / "default_pipeline.star").is_file():
+        raise ValueError("not a RELION project (no default_pipeline.star): %s" % project)
+    args = argparse.Namespace(project=str(project), job=None, max_hops=None, port=int(port), interval=interval, no_open=True)
+    return BackgroundServer(*make_server(args))
 
 
 def _default(project=None):
@@ -496,6 +718,35 @@ def _build_parser():
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_diff)
 
+    sp = sub.add_parser("compare", help="2+ jobs side by side: resolution/particles/maps, changed options, class overlap (the compare view, in the shell)")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", action="append", required=True, help="a job to compare; repeat for 3 or more")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_compare)
+
+    sp = sub.add_parser("maps", help="the maps (and .bild files) a job holds, grouped as the 3D buttons do")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", required=True, help="e.g. Refine3D/job042")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("-o", "--out", help="output file (default: stdout)")
+    sp.set_defaults(func=cmd_maps)
+
+    sp = sub.add_parser("open", help="open a job's maps in ChimeraX (one window; starts it if needed), optionally with a FigureStyle template")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", required=True, help="e.g. Refine3D/job042")
+    sp.add_argument("--map", help="part of a map entry's label, e.g. mask, half, post (see `reliontree maps`)")
+    sp.add_argument("--no-tile", action="store_true", help="do not tile several maps side by side")
+    sp.add_argument("--template", help="FigureStyle template to apply (default: the setting)")
+    sp.set_defaults(func=cmd_open)
+
+    sp = sub.add_parser("settings", help="show or set how ChimeraX is started (command, 'run first' snippet such as module load, FigureStyle template)")
+    sp.add_argument("--chimerax", help="ChimeraX command (one line)")
+    sp.add_argument("--run-first", help="shell snippet run before ChimeraX, e.g. 'module load chimerax'")
+    sp.add_argument("--template", help="FigureStyle template name (empty string = none)")
+    sp.add_argument("--check", action="store_true", help="run the snippet and `ChimeraX --version` (up to 60 s)")
+    sp.set_defaults(func=cmd_settings)
+
     sp = sub.add_parser("analyze", help="run the optional relion-origin checks and show the findings as pills on the job cards")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
     sp.set_defaults(func=cmd_analyze)
@@ -529,6 +780,13 @@ def _build_parser():
     sp.add_argument("--interval", type=int, default=10, help="browser auto-refresh interval in seconds")
     sp.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
     sp.set_defaults(func=cmd_watch)
+
+    sp = sub.add_parser("mcp", help="read-only MCP server (stdio) over a RELION project, for AI assistants")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.set_defaults(func=cmd_mcp)
+
+    sp = sub.add_parser("listener-path", help="print the path of the ChimeraX listener script (use: runscript <path> in a running ChimeraX)")
+    sp.set_defaults(func=lambda args: print(chimerax_bridge.LISTENER_SCRIPT))
 
     p.subcommand_names = frozenset(sub.choices)
     return p
