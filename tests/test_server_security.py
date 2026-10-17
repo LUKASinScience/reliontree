@@ -23,18 +23,21 @@ def server(tmp_path_factory):
     port = sock.getsockname()[1]
     sock.close()
     env = dict(os.environ, HOME=str(root))
+    errlog = root / "server.err"
     proc = subprocess.Popen([sys.executable, "-c", "import sys; from reliontree.cli import main; main(sys.argv[1:])",
                              "watch", str(proj), "--port", str(port), "--no-open"],
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(50):
+                            env=env, stdout=subprocess.DEVNULL, stderr=open(errlog, "w"))
+    deadline = time.time() + 90            # a loaded CI runner needs far longer than a laptop to start Python
+    while True:
         try:
-            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
             break
         except OSError:
-            time.sleep(0.1)
-    else:
-        proc.kill()
-        pytest.fail("server did not start")
+            if proc.poll() is not None or time.time() > deadline:
+                state = "exited with %s" % proc.returncode if proc.poll() is not None else "still not listening after 90 s"
+                proc.kill()
+                pytest.fail("server did not start (%s): %s" % (state, errlog.read_text()[-1500:]))
+            time.sleep(0.2)
     conn = http.client.HTTPConnection("127.0.0.1", port)
     conn.request("GET", "/")
     page = conn.getresponse().read().decode()
