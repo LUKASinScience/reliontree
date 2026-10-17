@@ -1,0 +1,80 @@
+/* reliontree guide: cheese-yellow accent, hero, cards, install "pills". Neutral: no paths, no names. */
+:root > * {
+  --md-accent-fg-color: #d99a00;
+  --md-accent-fg-color--transparent: #d99a001a;
+  --rt-pill-bg: #fff8e1;
+  --rt-pill-border: #f2d27a;
+  --rt-pill-text: #5b4300;
+  --rt-card-border: #e4e6ee;
+}
+[data-md-color-scheme="slate"] {
+  --rt-pill-bg: #2b2616;
+  --rt-pill-border: #6b5516;
+  --rt-pill-text: #ffe29a;
+  --rt-card-border: #343846;
+}
+
+/* ---- hero ---- */
+.rt-hero { text-align: center; padding: 1.2rem 0 0.4rem; }
+.rt-hero h1 { margin: 0 0 0.2rem; font-size: 2.6rem; letter-spacing: -0.02em; }
+.rt-hero p strong { font-size: 1.05rem; font-weight: 500; opacity: 0.85; }
+.rt-hero-gif { border-radius: 14px; box-shadow: 0 10px 34px rgba(0,0,0,0.16); max-width: 100%; margin: 0.6rem auto 1.1rem; }
+.rt-hero .md-button { margin: 0.2rem 0.25rem; border-radius: 999px; }
+
+/* ---- cards ---- */
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--rt-card-border);
+  border-radius: 14px;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.10);
+}
+.md-typeset .grid.cards > ul > li > p:first-child { font-size: 1.02rem; }
+.md-typeset .grid.cards .twemoji svg, .md-typeset .grid.cards .twemoji { color: var(--md-accent-fg-color); fill: currentColor; }
+
+/* ---- install pills: collapsed "???" blocks that look like buttons ---- */
+.md-typeset details.install {
+  border: 1px solid var(--rt-pill-border);
+  border-left-width: 1px;
+  background: var(--rt-pill-bg);
+  border-radius: 24px;
+  box-shadow: none;
+  margin: 0.6rem 0;
+  transition: box-shadow .2s ease;
+}
+.md-typeset details.install[open] { border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+.md-typeset details.install > summary {
+  background: transparent;
+  color: var(--rt-pill-text);
+  font-weight: 600;
+  padding: 0.55rem 2.6rem 0.55rem 2.6rem;
+  border-radius: 24px;
+  cursor: pointer;
+}
+.md-typeset details.install[open] > summary { border-radius: 16px 16px 0 0; border-bottom: 1px solid var(--rt-pill-border); }
+.md-typeset details.install > summary::before { background-color: var(--md-accent-fg-color); }
+.md-typeset details.install > summary::after { color: var(--rt-pill-text); }
+.md-typeset details.install > :not(summary) { margin-left: 1.1rem; margin-right: 1.1rem; }
+.md-typeset details.install > .highlight, .md-typeset details.install > pre { margin-left: 1.1rem; margin-right: 1.1rem; }
+.md-typeset details.install > p:last-child { margin-bottom: 0.9rem; }
+.md-typeset details.install > summary:hover { background: var(--md-accent-fg-color--transparent); }
+/* a terminal-style icon for the pills */
+.md-typeset details.install > summary::before {
+  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 19V7H4v12h16m0-16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16M7.5 9l1.4 1.4L7.3 12l1.6 1.6L7.5 15 4.5 12l3-3m4.5 6h5v1.5h-5V15z"/></svg>');
+          mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 19V7H4v12h16m0-16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16M7.5 9l1.4 1.4L7.3 12l1.6 1.6L7.5 15 4.5 12l3-3m4.5 6h5v1.5h-5V15z"/></svg>');
+}
+
+/* ---- tabs ("See it") as pills ---- */
+.md-typeset .tabbed-set > .tabbed-labels > label {
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  margin-right: 0.3rem;
+}
+.md-typeset .tabbed-set > .tabbed-labels::before { display: none; }
+.md-typeset .tabbed-set > input:checked + label, .md-typeset .tabbed-set > input:nth-child(1):checked ~ .tabbed-labels > :nth-child(1) {
+  background: var(--md-accent-fg-color--transparent);
+}
+.md-typeset .tabbed-content img { border-radius: 10px; border: 1px solid var(--rt-card-border); }

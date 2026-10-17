@@ -1,27 +1,129 @@
+---
+hide:
+  - toc
+---
+
+<div class="rt-hero" markdown>
+
 # reliontree
 
-Standalone RELION job-lineage viewer. No ChimeraX, no third-party server
-framework, no GUI toolkit — the default path is a self-starting stdlib-only
-local server. Same single command on a workstation, an HPC login node (no
-X11, no root), or a cloud VM.
+**One job, one cheese, one relentless mouse. The map of the hunt through your RELION project.**
 
-## Install and run
+![the mouse's hunting journey across a job tree](assets/mouse-hunt.gif){ .rt-hero-gif }
 
-reliontree is not on PyPI yet, so install it straight from GitHub:
+[Install :material-download:](#install){ .md-button .md-button--primary }
+[Command reference](commands.md){ .md-button }
+[GitHub](https://github.com/LUKASinScience/reliontree){ .md-button }
 
-```bash
-uvx --from git+https://github.com/LUKASinScience/reliontree reliontree
-```
+</div>
 
-No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree reliontree` works the same way — both run
-reliontree in an isolated environment with nothing left behind. For a persistent installation in an existing environment
-(Python 3.9 or newer, no further dependencies):
+A standalone viewer for the job lineage of a RELION project: no ChimeraX, no third-party server framework and no GUI toolkit
+needed. The default path is a self-starting, standard-library local server, with the same single command on a workstation,
+an HPC login node (no X11, no root) or a cloud VM.
 
-```bash
-pip install "git+https://github.com/LUKASinScience/reliontree"
-```
+## What you get
 
-## Zero-config
+<div class="grid cards" markdown>
+
+-   :material-graph-outline: **See every job**
+
+    ---
+
+    The whole lineage as a tree: state, resolution, particle count, masks, the path to the latest and best result.
+
+    [Command reference](commands.md)
+
+-   :material-compare-horizontal: **Compare runs**
+
+    ---
+
+    Changed options, resolution and particles side by side, and how particles moved between two classifications.
+
+    [Comparing jobs](compare.md)
+
+-   :material-cube-outline: **Open maps in ChimeraX**
+
+    ---
+
+    One click opens a job's maps or masks in a single ChimeraX window, with an optional FigureStyle template.
+
+    [ChimeraX and 3D](chimerax.md)
+
+-   :material-chart-bell-curve: **FSC and orientations**
+
+    ---
+
+    Resolution curves and angular distributions in the job details, straight from RELION's own files.
+
+    [See it below](#see-it)
+
+-   :material-robot-outline: **Scripts and AI assistants**
+
+    ---
+
+    JSON output everywhere and a read-only MCP server, so an assistant can answer "which job made this map?".
+
+    [Scripts and AI](ai.md)
+
+-   :material-server: **Cluster ready**
+
+    ---
+
+    Plain Python, no dependencies: a venv, a module file or its own batch job.
+
+    [Install](#install)
+
+</div>
+
+## Install
+
+reliontree needs **Python 3.9 or newer** and nothing else. It is not on PyPI yet, so it installs from GitHub. Click the way
+that fits your machine:
+
+??? install "Environment: venv or conda (recommended for daily use)"
+
+    ```bash
+    python3 -m venv ~/venvs/reliontree
+    source ~/venvs/reliontree/bin/activate
+    pip install "git+https://github.com/LUKASinScience/reliontree"
+    reliontree --help
+    ```
+
+    With conda: `conda create -n reliontree python=3.12 pip`, `conda activate reliontree`, then the same `pip install`.
+    In an environment you already have, run only the `pip install` line. Update later with
+    `pip install --upgrade "git+https://github.com/LUKASinScience/reliontree"`.
+
+??? install "Module on a cluster: module load reliontree"
+
+    For clusters that provide software through Lmod or Environment Modules. An admin sets it up once with the files in
+    [`contrib/modules/`](https://github.com/LUKASinScience/reliontree/tree/main/contrib/modules):
+
+    ```bash
+    ./install.sh /shared/apps/reliontree/<version>     # a private venv in a shared place
+    cp -r reliontree /shared/modulefiles/              # modulefiles, with install_dir edited to that path
+    ```
+
+    Users then run `module load reliontree` and use exactly the same `reliontree` command and options; the module only puts
+    the venv's `bin/` on `PATH`. To run the viewer as its own batch job instead of on a login node, see
+    [`contrib/slurm/`](https://github.com/LUKASinScience/reliontree/tree/main/contrib/slurm).
+
+??? install "Try it without installing anything"
+
+    ```bash
+    uvx --from git+https://github.com/LUKASinScience/reliontree reliontree
+    ```
+
+    No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree reliontree` does the same. Both run reliontree
+    in an isolated environment and leave nothing behind.
+
+!!! info "For the 3D buttons"
+
+    You also need [ChimeraX](https://www.cgl.ucsf.edu/chimerax/) on the machine that shows the maps. The plugin
+    [ChimeraX-InstantMap](https://github.com/LUKASinScience/ChimeraX-InstantMap) is **optional**: reliontree starts ChimeraX
+    with its own small listener, so the buttons work without it. InstantMap adds `instantmap listen` for a window you already
+    have open, plus its mask and RELION tools. Details: [ChimeraX and 3D](chimerax.md).
+
+## First run
 
 ```bash
 reliontree
@@ -39,155 +141,45 @@ error.
 ![reliontree — live browsing demo](assets/demo.gif)
 ![reliontree — job tree view](assets/screenshot-tree.png)
 
+## See it
+
+=== "Job tree"
+
+    ![reliontree: job tree view](assets/screenshot-tree.png)
+
+=== "Live browsing"
+
+    ![reliontree: live browsing demo](assets/demo.gif)
+
+=== "FSC curves"
+
+    ![FSC curves in the Details drawer (synthetic example project)](assets/screenshot-fsc.png)
+
+    A PostProcess job shows its FSC curves (corrected, masked, unmasked, phase-randomised) from `postprocess.star`; a Refine3D
+    job without post-processing shows the gold-standard curve from `run_model.star`. The marked 0.143 crossing is
+    interpolated, so it can differ from the number RELION reports (a shell value) by up to one shell. Orientation globes also
+    work for jobs without `*_angdist.bild`: they are then built from the angles in `run_data.star`.
+
+## Where next
+
+- [Command reference](commands.md): every subcommand, in detail
+- [Comparing jobs](compare.md): `compare`, `diff`, `overlap`, `why`, in the browser and in the shell
+- [ChimeraX and 3D](chimerax.md): the 3D buttons, settings for clusters, figure styles
+- [Scripts and AI assistants](ai.md): JSON output, the MCP server, headless ChimeraX
+- [Library and other tools](more.md): using reliontree from Python, and how it fits next to other RELION tools
+- [FAQ](faq.md)
+
 ## Why "reliontree"
 
 In relion, the mouse cursor hunts down exactly one piece of cheese per
 job, chasing it all the way to the end. reliontree is about the whole job
 tree: the mouse's full hunting journey across every job, in one run.
 
-![the mouse's hunting journey across a job tree](assets/mouse-hunt.gif)
 
 On a machine with no browser available (a cluster login node), use
 `reliontree tree --format html -o tree.html` for the old single-file static
 export instead — no server, just a file to `scp` back or open from a
 mounted path.
-
-## Commands
-
-### `tree` — job lineage
-
-```bash
-reliontree tree .                              # ASCII tree in the terminal
-reliontree tree . --format json                # machine-readable, for scripts/agents
-reliontree tree . --format html -o tree.html   # explicit static HTML file
-reliontree tree . --format svg -o tree.svg     # raw SVG only
-reliontree tree . --job Class3D/job012         # just that job's upstream lineage
-reliontree tree . --job Class3D/job012 --max-hops 3
-```
-
-`--format json` is the integration point for scripts or AI agents: a
-structured graph (`jobs`, `parents`, `artifacts`, `stats`) instead of text to
-parse, with defined exit codes (see below).
-
-### `table` — job history as CSV/Markdown
-
-```bash
-reliontree table . --format csv -o jobs.csv
-reliontree table . --format md
-```
-
-One row per job: type, state, parent(s), resolution, particle count — for a
-supplementary table or a quick spreadsheet import.
-
-### `methods` — draft methods-section paragraph
-
-```bash
-reliontree methods .
-```
-
-One line per job, assembled from each job's own recorded parameters
-(`job.star`) and outcome (resolution/particle count) — a starting point to
-edit, not a citation-ready paragraph.
-
-### `diff` — compare 2+ jobs' recorded options
-
-```bash
-reliontree diff --job Refine3D/job039 --job Refine3D/job042
-reliontree diff --job Refine3D/job039 --job Refine3D/job040 --job Refine3D/job041 --format json
-```
-
-Exactly 2 `--job` values gives a changed/unchanged split; 3 or more gives a
-varying/constant split across all of them at once — e.g. three Refine3D
-jobs that share a Select job as input, run with different mask diameters.
-
-### `why` — why does this job exist?
-
-```bash
-reliontree why --job Refine3D/job042
-```
-
-Its parent(s), its siblings (other jobs sharing a parent), and — when the
-parent is the same job type (e.g. Refine3D from Refine3D, not Refine3D
-from its Select input) — what changed in its options compared to the
-parent's, since a diff against a differently-typed parent is mostly noise.
-Both `diff` and `why` are also available live in the browser: check 2+
-jobs in the sidebar for "Compare", or open a job's Details drawer for
-"Why this job?" — computed client-side from data already on the page.
-
-### `watch` — live-refreshing local view, with options
-
-```bash
-reliontree watch .
-```
-
-This is what bare `reliontree` runs under the hood with its defaults; the
-`watch` subcommand exposes the knobs: `--port` (default `8710`),
-`--interval` (auto-refresh seconds, default `10`), `--no-open` (skip
-auto-opening the browser), plus the same `--job`/`--max-hops` as `tree`. A
-local server (Python's stdlib `http.server`, no Flask/Streamlit) rebuilds
-the tree on every request; usable on HPC/cloud too via an SSH tunnel.
-
-## Exit codes
-
-For use in scripts or CI:
-
-| Code | Meaning |
-|---|---|
-| `0` | ok |
-| `1` | no RELION project found (no `default_pipeline.star` in the given/current directory or any parent) |
-| `2` | parse or job-lookup error (e.g. `--job` names a job not in the pipeline) |
-
-## Using reliontree as a library
-
-Everything the CLI does is also a plain importable function — useful for a
-notebook, a script, or another tool's pipeline:
-
-```python
-import reliontree
-
-project = reliontree.find_project(".")        # or a specific path
-tree = reliontree.build_tree(project)
-html = reliontree.render_html(tree, title=str(project))
-
-rows = reliontree.history_rows(
-    reliontree.ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"],
-)
-csv_text = reliontree.rows_to_csv(rows)
-
-# compare two jobs' options, or ask why a job exists relative to its parent
-diff = reliontree.diff_options(tree["options"]["Refine3D/job039"], tree["options"]["Refine3D/job042"])
-context = reliontree.job_context(tree, "Refine3D/job042")
-```
-
-`tree` is a plain dict — no custom classes to learn. The core keys are `layers`, `parents`, `artifacts`, `stats`, `options`
-and `job_dirs`; around them: `alias`, `notes`, `classes`, `selection`, `latest`/`best`/`main`/`side` (the path to the latest
-result), `masks`/`chips`, `annotations` and `experiment` (`{"type": "sta" | "spa" | "unknown", "evidence": ...}`).
-
-## How reliontree fits alongside other RELION tools
-
-[Follow_Relion_gracefully](https://github.com/dzyla/Follow_Relion_gracefully)
-and [CNIO_Relion_Tools](https://github.com/cryoEM-CNIO/CNIO_Relion_Tools)
-are Streamlit/Dash apps — a good fit when running a small web server and
-reaching it from a browser is easy.
-[himena-relion](https://github.com/hanjinliu/himena-relion) is a desktop
-GUI, which makes sense when you want a full interactive workstation tool
-with a display attached. reliontree targets a narrower situation those
-aren't aimed at: an SSH-only cluster login node with no display and often
-no spare port to open. Its default view is still live in a browser, just
-via Python's own stdlib `http.server` bound to `127.0.0.1` — nothing to
-install, no port beyond your own machine. When even that's not reachable,
-`reliontree tree --format html -o tree.html` falls back to a single static
-file instead.
-
-Want to run `reliontree watch` as its own SLURM job instead of inside a GPU
-allocation (it never needs a GPU, and shouldn't tie one up)? `contrib/slurm/`
-in the repo has a minimal, CPU-only `sbatch` template and the SSH-tunnel
-steps to reach it from your laptop.
-
-Cluster provides software via `module load` instead of `pip install`?
-`contrib/modules/` has an Lmod/Tcl modulefile — once an admin sets it up,
-`module load reliontree` puts the exact same `reliontree` command (all the
-same subcommands and options) on `PATH`.
 
 ## Origin
 
@@ -198,13 +190,11 @@ plugin's RELION History tab — extracted into its own package since it never
 needed ChimeraX to begin with. ChimeraX-InstantMap's homepage:
 [github.com/LUKASinScience/ChimeraX-InstantMap](https://github.com/LUKASinScience/ChimeraX-InstantMap).
 
-## Contributors
+## Authors
 
-- Lukas W. Bauer ([LUKASinScience](https://github.com/LUKASinScience)) — author
-- Claude Code (Anthropic) — AI pair-programming assistant, wrote and
-  reviewed a substantial part of this codebase alongside Lukas
-- Serhat Dönmez ([serhatdonmez98-cmd](https://github.com/serhatdonmez98-cmd)) —
-  concept, screenshots and demo GIF for the README/docs
+- **Lukas W. Bauer** ([LUKASinScience](https://github.com/LUKASinScience)): author
+- **Serhat Dönmez** ([serhatdonmez98-cmd](https://github.com/serhatdonmez98-cmd)): co-author; concept, screenshots and the demo GIF
+- **Claude Code** (Anthropic): AI pair-programming assistant, wrote and reviewed a substantial part of this codebase alongside Lukas
 
 ## License
 
