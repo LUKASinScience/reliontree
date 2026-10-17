@@ -227,3 +227,49 @@ def test_zero_config_no_project_starts_picker(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+def test_compare_json_and_text(tmp_path):
+    project = _make_diff_project(tmp_path)
+    for n in ("run_it010_class001.mrc", "run_it010_class002.mrc"):
+        (project / "Class3D/job002" / n).write_bytes(b"x")
+    r = _run("compare", str(project), "--job", "Class3D/job002", "--job", "Class3D/job003", "--format", "json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert [j["job"] for j in d["jobs"]] == ["Class3D/job002", "Class3D/job003"]
+    assert d["options"]["changed"]["tau_fudge"] == ["4", "2"]
+    assert d["jobs"][0]["maps"][0]["label"].startswith("All 2 classes") and d["jobs"][1]["maps"] == []
+    t = _run("compare", str(project), "--job", "Class3D/job002", "--job", "Class3D/job003")
+    assert t.returncode == 0 and "tau_fudge" in t.stdout and "Changed options" in t.stdout
+    assert _run("compare", str(project), "--job", "Class3D/job002", "--job", "Nope/job9").returncode == 2
+
+
+def test_maps_and_open_refuse_bad_input(tmp_path):
+    project = _make_diff_project(tmp_path)
+    (project / "Class3D/job002" / "run_class001.mrc").write_bytes(b"x")
+    m = _run("maps", str(project), "--job", "Class3D/job002", "--format", "json")
+    assert m.returncode == 0 and json.loads(m.stdout)["maps"][0]["files"] == ["run_class001.mrc"]
+    assert _run("maps", str(project), "--job", "../../etc").returncode == 2
+    assert _run("open", str(project), "--job", "Class3D/job003").returncode == 2           # no maps in that job
+    assert _run("open", str(project), "--job", "Class3D/job002", "--map", "zzz").returncode == 2
+
+
+def test_open_queues_with_template(tmp_path, monkeypatch):
+    from reliontree import chimerax_bridge, cli
+    project = _make_diff_project(tmp_path)
+    for n in ("run_class001.mrc", "mask.mrc"):
+        (project / "Class3D/job002" / n).write_bytes(b"x")
+    seen = {}
+    monkeypatch.setattr(chimerax_bridge, "open_files", lambda paths, tile=False, style=None: seen.update(
+        files=[p.name for p in paths], tile=tile, style=style) or "queued")
+    cli.main(["open", str(project), "--job", "Class3D/job002", "--map", "mask", "--template", "Mask overlay"])
+    assert seen == {"files": ["mask.mrc"], "tile": False, "style": "Mask overlay"}
+
+
+def test_settings_command_roundtrip(tmp_path, monkeypatch, capsys):
+    from reliontree import chimerax_bridge, cli
+    monkeypatch.setattr(chimerax_bridge, "HOME_DIR", tmp_path)
+    monkeypatch.setattr(chimerax_bridge, "SETTINGS_FILE", tmp_path / "settings.json")
+    cli.main(["settings", "--chimerax", "cx", "--run-first", "module load chimerax", "--template", "Mask overlay"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["settings"] == {"chimerax_cmd": "cx", "prelaunch": "module load chimerax", "figure_template": "Mask overlay"}

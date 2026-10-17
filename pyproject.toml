@@ -1,11 +1,26 @@
 [project]
 name = "reliontree"
-version = "0.3.0"
+version = "0.4.0"
 description = "Standalone RELION job-lineage viewer — no ChimeraX, no third-party server framework, no GUI toolkit required"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.9"
 dependencies = []
+authors = [{ name = "Lukas W. Bauer" }, { name = "Serhat Dönmez" }]
+keywords = ["relion", "cryo-em", "cryo-et", "job-tree", "pipeline", "visualization", "structural-biology"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.urls]
+Homepage = "https://github.com/LUKASinScience/reliontree"
+Documentation = "https://lukasinscience.github.io/reliontree/"
+Issues = "https://github.com/LUKASinScience/reliontree/issues"
 
 [project.scripts]
 reliontree = "reliontree.cli:main"
