@@ -330,6 +330,21 @@ def _conv_svg(x, y, w, h, pts):
              "" if last <= CONV_SETTLED else " \u00b7 not converged"))
 
 
+def _wrap_label(segments, max_chars):
+    """Greedy-wrap the ' / '-joined footer segments onto lines that fit the card; a segment is never split."""
+    lines, cur = [], ""
+    for seg in segments:
+        trial = seg if not cur else cur + " / " + seg
+        if cur and len(trial) > max_chars:
+            lines.append(cur)
+            cur = seg
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def _card_layout(tree, job, thumbs):
     """Precompute everything geometry-dependent for one card so the size
     used for column layout and the size actually drawn agree exactly --
@@ -378,10 +393,11 @@ def _card_layout(tree, job, thumbs):
 
     conv = _convergence(tree, job)
     compact = tree["artifacts"].get(job, {}).get("state") == "missing"   # nothing on disk to show
-    height = (HEADER_H + badge_h + anno_h + chip_h + grid_h + FOOTER_LINE_H + (FOOTER_LINE_H if label2 else 0) +
+    label_lines = _wrap_label(label2, int((CARD_W - 16) / 5.6))   # ~5.6 px per character at font-size 10-11
+    height = (HEADER_H + badge_h + anno_h + chip_h + grid_h + FOOTER_LINE_H + FOOTER_LINE_H * len(label_lines) +
               (CONV_H if conv else 0) + PADDING_BOTTOM + (0 if compact else DETAILS_BTN_H))
     return {
-        "label2": label2, "conv": conv, "cols": cols, "thumb_size": thumb_size,
+        "label2": label2, "label_lines": label_lines, "conv": conv, "cols": cols, "thumb_size": thumb_size,
         "grid_w": grid_w, "grid_h": grid_h, "height": height,
         "badges": badges, "badge_h": badge_h, "anno_h": anno_h, "chip_h": chip_h, "compact": compact,
     }
@@ -589,12 +605,12 @@ def render_svg(tree, fit=False):
 
         parts.append('<text x="%.1f" y="%.1f" fill="%s">[%s]</text>' %
                       (x + 8, text_y, state_color, _esc(state)))
-        if lay["label2"]:
+        for li, line in enumerate(lay["label_lines"]):
             parts.append('<text x="%.1f" y="%.1f" fill="#555">%s</text>' %
-                          (x + 8, text_y + 14, _esc(" / ".join(lay["label2"]))))
+                          (x + 8, text_y + 14 * (li + 1), _esc(line)))
 
         if lay["conv"]:
-            conv_y = text_y + (14 if lay["label2"] else 0) + 16
+            conv_y = text_y + 14 * len(lay["label_lines"]) + 16
             parts.append(_conv_svg(x + 8, conv_y, CARD_W - 16, CONV_H - 22, lay["conv"]))
 
         chip_list = tree.get("chips", {}).get(job, [])
