@@ -22,7 +22,7 @@ def _format_number(n):
         return str(n)
 
 
-def job_sentence(job_id, options, stats):
+def job_sentence(job_id, options, stats, alias=""):
     """One best-effort line describing a single job's parameters (from its
     own `job.star` options) and outcome (from `relion_artifacts.
     job_stats()`)."""
@@ -41,7 +41,7 @@ def job_sentence(job_id, options, stats):
         details.append("%s Å particle diameter" % diameter)
 
     detail_str = " (%s)" % ", ".join(details) if details else ""
-    line = "%s%s" % (job_id, detail_str)
+    line = "%s%s%s" % (job_id, " [%s]" % alias if alias else "", detail_str)
 
     outcome = []
     resolution = stats.get("resolution_angstrom")
@@ -55,12 +55,12 @@ def job_sentence(job_id, options, stats):
     return line
 
 
-def draft_methods_paragraph(ordered_jobs, job_options, job_stats):
+def draft_methods_paragraph(ordered_jobs, job_options, job_stats, job_alias=None):
     """`ordered_jobs`: job ids root→final, in the order they should be
     described. `job_options`/`job_stats`: {job_id: dict}. Returns a short
     multi-line draft — one line per job — meant as a starting point for a
     methods section, not a finished paragraph."""
     return "\n".join(
-        job_sentence(job_id, job_options.get(job_id), job_stats.get(job_id))
+        job_sentence(job_id, job_options.get(job_id), job_stats.get(job_id), (job_alias or {}).get(job_id, ""))
         for job_id in ordered_jobs
     )

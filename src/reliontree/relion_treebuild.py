@@ -7,6 +7,8 @@ import re
 import struct
 from pathlib import Path
 
+from .relion_fsc import fsc_curves
+
 try:
     from .relion_annotations import load_annotations
     from .relion_pipeline import load_pipeline, load_meta, detect_experiment, build_parents, upstream, limit_hops, layers as pipeline_layers
@@ -226,8 +228,11 @@ def build_tree(project_dir, selected=None, max_hops=None):
     annotations = {j: a for j, a in load_annotations(project_dir).items() if j in job_dirs}
     experiment = detect_experiment({j: meta[j] for j in meta if j in job_dirs}, job_dirs.values())
 
-    final, best, main, side = find_main_path(layered, parents, artifacts, stats)
+    fsc_res = lambda j: (fsc_curves(job_dirs[j]) or {}).get("resolution")
+    final, best, main, side = find_main_path(layered, parents, artifacts, stats, fsc_res)
+    best_fsc = fsc_res(best) if best and job_type(best) in ("PostProcess", "Refine3D") else None
     return {
+        "best_fsc": best_fsc,
         "selection": selection, "chosen": chosen,
         "layers": lyrs, "parents": parents,
         "artifacts": artifacts, "stats": stats, "options": options,
@@ -257,7 +262,7 @@ def user_notes(job_dir):
     return "\n".join(keep)[:1000]
 
 
-def find_main_path(jobs, parents, artifacts, stats):
+def find_main_path(jobs, parents, artifacts, stats, fsc_res=None):
     """(latest, best, main, side): `latest` = highest-numbered succeeded job
     of the most "final" type present (PostProcess > Refine3D > Class3D >
     Class2D); `best` = lowest resolution_angstrom among succeeded
@@ -275,7 +280,13 @@ def find_main_path(jobs, parents, artifacts, stats):
             latest = max(cand, key=num)
             break
     res = [j for j in ok if job_type(j) in ("Refine3D", "PostProcess") and stats[j].get("resolution_angstrom")]
-    best = min(res, key=lambda j: stats[j]["resolution_angstrom"]) if res else None
+    best = None
+    if res:
+        low = min(stats[j]["resolution_angstrom"] for j in res)
+        tied = [j for j in res if stats[j]["resolution_angstrom"] == low]
+        # RELION's shell value is quantised, ties are common: interpolated FSC crossing decides, then the newer job
+        cross = lambda j: (fsc_res(j) if fsc_res and len(tied) > 1 else None) or float("inf")
+        best = min(tied, key=lambda j: (cross(j), -num(j)))
     main, todo = set(), [latest] if latest else []
     while todo:
         j = todo.pop()
@@ -327,7 +338,10 @@ def _card_layout(tree, job, thumbs):
     stats = tree["stats"].get(job, {})
     label2 = []
     if stats.get("resolution_angstrom"):
-        label2.append("%.1f A" % stats["resolution_angstrom"])
+        bf = tree.get("best_fsc") if job == tree.get("best") else None
+        label2.append("%.1f A shell" % stats["resolution_angstrom"] if bf else "%.1f A" % stats["resolution_angstrom"])
+        if bf:
+            label2.append("%.2f A FSC" % bf)
     if stats.get("n_particles"):
         label2.append("%s particles" % format(stats["n_particles"], ","))
 
@@ -584,8 +598,9 @@ def render_svg(tree, fit=False):
             parts.append(_conv_svg(x + 8, conv_y, CARD_W - 16, CONV_H - 22, lay["conv"]))
 
         chip_list = tree.get("chips", {}).get(job, [])
+        btn_h = 0 if lay["compact"] else DETAILS_BTN_H      # a missing card has no Details strip below the chips
         for k, m in enumerate(chip_list[:MAX_CHIPS]):
-            cx, cy = x + 8 + k * (CHIP_W + 4), y + h - DETAILS_BTN_H - CHIP_H + 4
+            cx, cy = x + 8 + k * (CHIP_W + 4), y + h - btn_h - CHIP_H + 4
             uri = chip_thumbs.get(m)
             parts.append('<g class="mask-chip" data-job="%s"><title>%s \u2014 mask used by this job</title>'
                          '<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="4" fill="#f4f8ec" stroke="#cfe0b5"/>' %
@@ -597,7 +612,7 @@ def render_svg(tree, fit=False):
                          (cx + CHIP_THUMB + 5, cy + 17, _esc("m" + m.split("job")[-1])))
         if len(chip_list) > MAX_CHIPS:
             parts.append('<text x="%.1f" y="%.1f" font-size="10" fill="#666">+%d</text>' %
-                         (x + 8 + MAX_CHIPS * (CHIP_W + 4), y + h - DETAILS_BTN_H - 13, len(chip_list) - MAX_CHIPS))
+                         (x + 8 + MAX_CHIPS * (CHIP_W + 4), y + h - btn_h - 13, len(chip_list) - MAX_CHIPS))
 
         if not lay["compact"]:
             # A visibly clickable "Details" strip at the bottom of every card —

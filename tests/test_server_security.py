@@ -95,3 +95,22 @@ def test_post_settings(server):
     status, data = call(server, "POST", "/settings", ok, json.dumps({"t": t, "chimerax_cmd": "a\nb"}))
     assert status == 400 and "single line" in data["error"]
     assert call(server, "POST", "/other", ok, "{}")[0] == 404
+
+
+def test_every_route_checks_host_and_origin(server):
+    evil = {"Host": "evil.example:80"}
+    for path in ("/", "/class-thumbs?job=Class2D/job001&it=1", "/overlap?a=Class2D/job001&b=Class2D/job002", "/orientation?job=Class3D/job001"):
+        assert call(server, "GET", path, evil)[0] == 403, path
+        assert call(server, "GET", path, {"Origin": "http://evil.example"})[0] == 403, path
+    assert call(server, "GET", "/")[0] == 200
+
+
+def test_open_and_browse_need_the_token(server):
+    t, proj = server["token"], str(server["home"] / "proj")
+    for q in ("open=" + proj, "browse=" + str(server["home"])):
+        assert call(server, "GET", "/?" + q)[0] == 403                                   # cross-site <img>: no token
+        assert call(server, "GET", "/?%s&t=wrong" % q)[0] == 403
+        assert call(server, "GET", "/?%s&t=%s" % (q, t), {"Host": "evil.example"})[0] == 403
+    assert call(server, "GET", "/?open=%s&t=%s" % (proj, t))[0] == 302
+    status, page = call(server, "GET", "/?browse=%s&t=%s" % (server["home"], t))
+    assert status == 200 and "&amp;t=" + t in page            # page links carry the token

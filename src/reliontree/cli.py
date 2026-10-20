@@ -42,6 +42,7 @@ from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
 from .relion_orientation import job_orientation
 from . import relion_plan
+from .relion_pipeline import load_pipeline, resolve_job
 from .relion_project import ProjectNotFoundError, find_project
 from .render_html import render_html
 
@@ -53,9 +54,54 @@ def _write(text, out_path):
         sys.stdout.write(text if text.endswith("\n") else text + "\n")
 
 
-def _build(args):
+def _project(args):
+    """The project dir for a one-shot command. A missing default_pipeline.star -> ProjectNotFoundError (exit 1);
+    an empty, truncated or unreadable one -> ValueError (exit 2). A valid but job-less project passes (queries may be empty)."""
     project = Path(args.project) if getattr(args, "project", None) else find_project()
-    return project, build_tree(project, selected=args.job, max_hops=args.max_hops)
+    star = project / "default_pipeline.star"
+    if not star.is_file():
+        raise ProjectNotFoundError("no RELION project found (no default_pipeline.star in %s)" % project)
+    try:
+        text = star.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("cannot read %s: %s" % (star, exc))
+    # Real RELION files start with a blank line and "# version NNNNN" and end with a space, so: no
+    # startswith("data_") and no endswith("\n"). Reject only empty files, files without any data_ block
+    # (not STAR) and files cut off mid-line (last character is not whitespace).
+    if not re.search(r"^data_", text, re.M) or not text[-1:].isspace():
+        raise ValueError("%s is empty, truncated or not a RELION pipeline file" % star)
+    return project
+
+
+def _positive_int(text):
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError("%r is not a positive integer (omit the option for the whole lineage)" % text)
+    return n
+
+
+def _jobs(project, names):
+    """Canonical ids for `names` (alias / trailing slash accepted); ValueError for a job that is not in the pipeline
+    and for one that is listed but whose directory is gone ("missing")."""
+    procs = load_pipeline(project)[0]
+    out = []
+    for name in names:
+        job = resolve_job(project, name)
+        if job not in procs:
+            raise ValueError("job not found in pipeline: %s" % name)
+        if not (project / job).is_dir():
+            raise ValueError("job missing: %s is listed in the pipeline but its directory is not on disk" % job)
+        out.append(job)
+    return out
+
+
+def _build(args):
+    project = _project(args)
+    job = resolve_job(project, args.job) if args.job else None
+    return project, build_tree(project, selected=job, max_hops=args.max_hops)
 
 
 def cmd_tree(args):
@@ -74,19 +120,20 @@ def cmd_tree(args):
             "project": str(project),
             "jobs": jobs,
             "parents": {j: sorted(p) for j, p in tree["parents"].items()},
-            "artifacts": {j: {k: (str(v) if v else v) for k, v in a.items()}
+            "alias": {j: tree["alias"].get(j, "") for j in jobs},
+            "artifacts": {j: {k: (v if isinstance(v, bool) else str(v) if v else v) for k, v in a.items()}
                           for j, a in tree["artifacts"].items()},
             "stats": tree["stats"],
         }, indent=2), args.out)
     else:
-        lines = ["%s  [%s]" % (j, tree["artifacts"][j]["state"]) for j in jobs]
+        lines = ["%s  [%s]%s" % (j, tree["artifacts"][j]["state"], "  (%s)" % tree["alias"][j] if tree["alias"].get(j) else "") for j in jobs]
         _write("\n".join(lines), args.out)
 
 
 def cmd_table(args):
     _, tree = _build(args)
     jobs = ordered_jobs(tree)
-    rows = history_rows(jobs, tree["artifacts"], tree["parents"], tree["stats"])
+    rows = history_rows(jobs, tree["artifacts"], tree["parents"], tree["stats"], tree["alias"])
     text = rows_to_markdown(rows) if args.format == "md" else rows_to_csv(rows)
     _write(text, args.out)
 
@@ -94,37 +141,36 @@ def cmd_table(args):
 def cmd_methods(args):
     _, tree = _build(args)
     jobs = ordered_jobs(tree)
-    _write(draft_methods_paragraph(jobs, tree["options"], tree["stats"]), args.out)
+    _write(draft_methods_paragraph(jobs, tree["options"], tree["stats"], tree["alias"]), args.out)
 
 
 def cmd_diff(args):
     """Compare 2+ jobs' recorded `job.star` options: exactly 2 gives a
     changed/unchanged split, 3+ gives a varying/constant split across all
     of them (e.g. sibling Refine3D jobs under the same Select job)."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
+    jobs = _jobs(project, args.job)
     tree = build_tree(project)
-    jobs = args.job
-    missing = [j for j in jobs if j not in tree["options"]]
-    if missing:
-        raise ValueError("job(s) not found in pipeline: %s" % ", ".join(missing))
+    label = lambda j: "%s (%s)" % (j, tree["alias"][j]) if tree["alias"].get(j) else j
+    aliases = {j: tree["alias"].get(j, "") for j in jobs}
 
     if len(jobs) == 2:
-        result = diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]])
+        result = dict(diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]]), alias=aliases)
         if args.format == "json":
             _write(json.dumps(result, indent=2), args.out)
             return
-        lines = ["Comparing %s vs %s" % (jobs[0], jobs[1]), "", "Changed:"]
+        lines = ["Comparing %s vs %s" % (label(jobs[0]), label(jobs[1])), "", "Changed:"]
         for key, (a, b) in sorted(result["changed"].items()):
             lines.append("  %-30s %s -> %s" % (key, a, b))
         if not result["changed"]:
             lines.append("  (none -- identical options)")
         _write("\n".join(lines), args.out)
     else:
-        result = diff_many_options({j: tree["options"][j] for j in jobs})
+        result = dict(diff_many_options({j: tree["options"][j] for j in jobs}), alias=aliases)
         if args.format == "json":
             _write(json.dumps(result, indent=2), args.out)
             return
-        lines = ["Comparing %d jobs: %s" % (len(jobs), ", ".join(jobs)), "", "Varying:"]
+        lines = ["Comparing %d jobs: %s" % (len(jobs), ", ".join(label(j) for j in jobs)), "", "Varying:"]
         for key, values in sorted(result["varying"].items()):
             lines.append("  %s" % key)
             for j in jobs:
@@ -138,7 +184,7 @@ def _job_summary(tree, job, project):
     """One row per job for `compare`: what the browser's compare view shows at a glance."""
     art = tree["artifacts"].get(job) or {}
     st = tree["stats"].get(job) or {}
-    return {"job": job, "type": job.split("/")[0], "state": art.get("state", "unknown"),
+    return {"job": job, "alias": tree["alias"].get(job, ""), "type": job.split("/")[0], "state": art.get("state", "unknown"),
             "parents": sorted(tree["parents"].get(job, ())), "resolution_angstrom": st.get("resolution_angstrom"),
             "n_particles": st.get("n_particles"),
             "maps": [{"label": m["label"], "files": m["files"]} for m in list_job_maps(project / job)]}
@@ -147,12 +193,9 @@ def _job_summary(tree, job, project):
 def cmd_compare(args):
     """Everything about 2+ jobs side by side: state/resolution/particles, changed options, maps, and (two
     classification jobs) the particle overlap. The command-line twin of the browser's compare view."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
+    jobs = _jobs(project, args.job)
     tree = build_tree(project)
-    jobs = args.job
-    missing = [j for j in jobs if j not in tree["options"]]
-    if missing:
-        raise ValueError("job(s) not found in pipeline: %s" % ", ".join(missing))
     out = {"jobs": [_job_summary(tree, j, project) for j in jobs]}
     out["options"] = (diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]]) if len(jobs) == 2
                       else diff_many_options({j: tree["options"][j] for j in jobs}))
@@ -165,10 +208,10 @@ def cmd_compare(args):
     if args.format == "json":
         _write(json.dumps(out, indent=2), args.out)
         return
-    lines = ["%-26s %-10s %-10s %10s %12s  %s" % ("job", "type", "state", "res (A)", "particles", "maps")]
+    lines = ["%-26s %-16s %-10s %-10s %10s %12s  %s" % ("job", "alias", "type", "state", "res (A)", "particles", "maps")]
     for r in out["jobs"]:
         res = "%.1f" % r["resolution_angstrom"] if r["resolution_angstrom"] else "-"
-        lines.append("%-26s %-10s %-10s %10s %12s  %s" % (r["job"], r["type"], r["state"], res,
+        lines.append("%-26s %-16s %-10s %-10s %10s %12s  %s" % (r["job"], r["alias"] or "-", r["type"], r["state"], res,
                      "{:,}".format(r["n_particles"]) if r["n_particles"] else "-", ", ".join(m["label"] for m in r["maps"]) or "-"))
     lines.append("")
     if len(jobs) == 2:
@@ -196,9 +239,8 @@ def cmd_compare(args):
 
 def cmd_maps(args):
     """The maps a job holds, as the 3D buttons group them (label + file names)."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
-    if not _JOB_ID.fullmatch(args.job):
-        raise ValueError("bad job id %r" % args.job)
+    project = _project(args)
+    args.job, = _jobs(project, [args.job])
     maps = list_job_maps(project / args.job)
     if args.format == "json":
         _write(json.dumps({"job": args.job, "maps": maps}, indent=2), args.out)
@@ -209,9 +251,8 @@ def cmd_maps(args):
 def cmd_open(args):
     """Open a job's maps in the ONE ChimeraX that reliontree talks to (starts it if none runs) -- the 3D button, from the shell.
     --map picks an entry by its label (see `reliontree maps`); default: the most important one."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
-    if not _JOB_ID.fullmatch(args.job):
-        raise ValueError("bad job id %r" % args.job)
+    project = _project(args)
+    args.job, = _jobs(project, [args.job])
     maps = list_job_maps(project / args.job)
     if not maps:
         raise ValueError("no maps in %s" % args.job)
@@ -248,7 +289,7 @@ def cmd_analyze(args):
     """Run relion-origin's per-particle checks (orientation gaps, mixing beyond chance) and write them where the view
     picks them up. relion-origin is an optional companion (numpy, pandas, starfile): it is imported here and nowhere
     else, so everything else in reliontree works without it."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
     try:
         from relion_origin.annotations import annotate_project, write_annotations
     except ImportError:
@@ -263,7 +304,7 @@ def cmd_analyze(args):
 
 def cmd_plan(args):
     """plan check (dry run, default) / plan apply (register as Scheduled, runs nothing)."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
     rows = relion_plan.resolve(project, relion_plan.load(args.plan))
     lines, bad = [], False
     for r in rows:
@@ -288,7 +329,8 @@ def cmd_plan(args):
 def cmd_overlap(args):
     """Particle overlap between two Class2D/Class3D jobs (rows: job A's
     classes, columns: job B's), from each job's final data.star."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
+    args.job_a, args.job_b = _jobs(project, [args.job_a, args.job_b])
     result = class_overlap(project / args.job_a, project / args.job_b)
     if result is None:
         raise ValueError("both jobs need a run_data.star / run_itNNN_data.star")
@@ -307,16 +349,15 @@ def cmd_overlap(args):
 def cmd_why(args):
     """"Why does this job exist?": its parent(s), sibling jobs sharing a
     parent, and what changed in its options compared to its parent's."""
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
+    args.job, = _jobs(project, [args.job])
     tree = build_tree(project)
-    if args.job not in tree["parents"]:
-        raise ValueError("job %r not found in pipeline under %s" % (args.job, project))
-    ctx = job_context(tree, args.job)
+    ctx = dict(job_context(tree, args.job), alias=tree["alias"].get(args.job, ""))
     if args.format == "json":
         _write(json.dumps(ctx, indent=2), args.out)
         return
     lines = [
-        "Job: %s" % args.job,
+        "Job: %s%s" % (args.job, " (%s)" % ctx["alias"] if ctx["alias"] else ""),
         "",
         "Parent(s): %s" % (", ".join(ctx["parents"]) or "(none)"),
         "Sibling(s): %s" % (", ".join(ctx["siblings"]) or "(none)"),
@@ -342,7 +383,7 @@ def _nav_button(label, href, primary=False):
         cls, html.escape(href, quote=True), html.escape(label))
 
 
-def _dir_entries_html(browse_dir, current_project=None):
+def _dir_entries_html(browse_dir, current_project=None, token=""):
     """The directory-listing part shared by the in-tree browse drawer and
     the no-project picker screen: an "open as project" button when
     `browse_dir` itself holds a default_pipeline.star, an "up" button, and
@@ -350,20 +391,20 @@ def _dir_entries_html(browse_dir, current_project=None):
     links — one consistent clickable affordance everywhere in this UI."""
     parts = []
     if (browse_dir / "default_pipeline.star").is_file() and browse_dir != current_project:
-        parts.append(_nav_button("Open this as project →", "/?open=%s" % browse_dir, primary=True))
+        parts.append(_nav_button("Open this as project →", "/?open=%s&t=%s" % (browse_dir, token), primary=True))
     if browse_dir.parent != browse_dir:
-        parts.append(_nav_button(".. (up)", "/?browse=%s" % browse_dir.parent))
+        parts.append(_nav_button(".. (up)", "/?browse=%s&t=%s" % (browse_dir.parent, token)))
     try:
         subdirs = sorted(p for p in browse_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
     except OSError:
         subdirs = []
     for sub in subdirs:
         marker = " *" if (sub / "default_pipeline.star").is_file() else ""
-        parts.append(_nav_button(sub.name + marker, "/?browse=%s" % sub))
+        parts.append(_nav_button(sub.name + marker, "/?browse=%s&t=%s" % (sub, token)))
     return "\n".join(parts)
 
 
-def _render_browse_panel(browse_dir, current_project, error=None, start_open=False):
+def _render_browse_panel(browse_dir, current_project, error=None, start_open=False, token=""):
     """The right-hand drawer's content: current project, an optional error,
     where we're browsing, and the shared directory-listing buttons.
     `start_open` renders it already expanded — used when the request itself
@@ -375,7 +416,7 @@ def _render_browse_panel(browse_dir, current_project, error=None, start_open=Fal
     if error:
         parts.append('<p class="note">%s</p>' % html.escape(error))
     parts.append('<p class="path">Browsing: %s</p>' % html.escape(str(browse_dir)))
-    parts.append(_dir_entries_html(browse_dir, current_project))
+    parts.append(_dir_entries_html(browse_dir, current_project, token))
     cls = "drawer open" if start_open else "drawer"
     return '<div id="browse" class="%s">\n%s\n</div>' % (cls, "\n".join(parts))
 
@@ -411,7 +452,7 @@ _PICKER_PAGE = """<!doctype html>
 """
 
 
-def _render_picker_page(browse_dir, error=None):
+def _render_picker_page(browse_dir, error=None, token=""):
     """Standalone start screen for when reliontree is launched with no
     project directory at all (no default_pipeline.star found upward from
     cwd) — the same browse-and-open buttons as the in-tree drawer, full
@@ -420,7 +461,7 @@ def _render_picker_page(browse_dir, error=None):
     return _PICKER_PAGE.format(
         error='<p class="note">%s</p>' % html.escape(error) if error else "",
         browse_dir=html.escape(str(browse_dir)),
-        entries=_dir_entries_html(browse_dir),
+        entries=_dir_entries_html(browse_dir, token=token),
     )
 
 
@@ -459,6 +500,8 @@ def _api(route, query, project):
     try:
         if route == "/class-thumbs":
             size = min(int(query.get("size", ["72"])[0]), 400)
+            if "it" not in query:
+                raise ValueError("missing parameter 'it' (the iteration number)")
             return {"thumbs": class_iter_thumbs(job_dir("job"), int(query["it"][0]), size)}
         if route == "/orientation":
             cls = query.get("cls", [""])[0]
@@ -469,13 +512,16 @@ def _api(route, query, project):
         return {"classes_a": result["classes_a"], "classes_b": result["classes_b"],
                 "counts": {"%d,%d" % k: v for k, v in result["counts"].items()},
                 "order_b": result["order_b"], "score": result["score"]}
-    except (ValueError, KeyError) as exc:
-        return {"error": str(exc)}
+    except KeyError as exc:
+        return {"error": "missing parameter %s" % exc}
+    except ValueError as exc:
+        msg = str(exc)
+        return {"error": "invalid number in the request (%s)" % msg if msg.startswith("invalid literal") else msg}
 
 
 def cmd_mcp(args):
     from .mcp_server import serve
-    project = Path(args.project) if getattr(args, "project", None) else find_project()
+    project = _project(args)
     serve(project)
 
 
@@ -505,17 +551,22 @@ def make_server(args):
     own_hosts = ("127.0.0.1:%d" % args.port, "localhost:%d" % args.port)
 
     class Handler(BaseHTTPRequestHandler):
-        def _authorized(self, token):
+        def _own_origin(self):
             origin = self.headers.get("Origin")
             return (self.headers.get("Host", "") in own_hosts
-                    and (origin is None or origin in ["http://" + h for h in own_hosts])
-                    and secrets.compare_digest(str(token or ""), page_token))
+                    and (origin is None or origin in ["http://" + h for h in own_hosts]))
+
+        def _authorized(self, token):
+            return self._own_origin() and secrets.compare_digest(str(token or ""), page_token)
 
         def _deny(self):
             self._json({"error": "forbidden (open this page from the reliontree server itself)"}, status=403)
 
         def do_POST(self):
             try:
+                if not self._own_origin():
+                    self._deny()
+                    return
                 if urlsplit(self.path).path != "/settings":
                     self._json({"error": "not found"}, status=404)
                     return
@@ -538,8 +589,18 @@ def make_server(args):
 
         def do_GET(self):
             try:
+                if not self._own_origin():      # every route: blocks DNS rebinding and cross-site requests
+                    self._deny()
+                    return
                 query = parse_qs(urlsplit(self.path).query)
                 error = None
+                route = urlsplit(self.path).path
+                if route not in ("/", "/open-3d", "/settings", "/settings-check", "/class-thumbs", "/overlap", "/orientation"):
+                    self._text("not found: %s" % route, 404)
+                    return
+                if ("open" in query or "browse" in query) and not self._authorized(query.get("t", [""])[0]):
+                    self._deny()                # these switch the project / list directories: page links carry the token
+                    return
                 if "open" in query:
                     candidate = Path(query["open"][0]).resolve()
                     if (candidate / "default_pipeline.star").is_file():
@@ -551,7 +612,6 @@ def make_server(args):
                     self.end_headers()
                     return
 
-                route = urlsplit(self.path).path
                 if route in ("/open-3d", "/settings", "/settings-check"):
                     if not self._authorized(query.get("t", [""])[0]):
                         self._deny()
@@ -570,7 +630,7 @@ def make_server(args):
 
                 if state["project"] is None:
                     browse_dir = Path(query.get("browse", [str(Path.cwd())])[0])
-                    body = _render_picker_page(browse_dir, error).encode("utf-8")
+                    body = _render_picker_page(browse_dir, error, page_token).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(body)))
@@ -585,7 +645,15 @@ def make_server(args):
                 # just a link instead of a Qt dialog.
                 selected_job = query["job"][0] if "job" in query else args.job
                 selected_job = selected_job or None
-                max_hops = int(query["max_hops"][0]) if query.get("max_hops", [""])[0] else args.max_hops
+                max_hops = args.max_hops
+                if query.get("max_hops", [""])[0]:
+                    try:
+                        max_hops = int(query["max_hops"][0])
+                        if max_hops < 1:
+                            raise ValueError
+                    except ValueError:
+                        self._text("bad max_hops %r: use a positive integer (leave it out for the whole lineage)" % query["max_hops"][0], 400)
+                        return
                 try:
                     tree = build_tree(state["project"], selected=selected_job, max_hops=max_hops)
                 except ValueError:
@@ -594,7 +662,7 @@ def make_server(args):
                     selected_job = None
                     tree = build_tree(state["project"], selected=None, max_hops=None)
                 browse_html = _render_browse_panel(browse_dir, state["project"], error,
-                                                     start_open=("browse" in query or "open" in query))
+                                                     start_open=("browse" in query or "open" in query), token=page_token)
                 page = render_html(tree, title=str(state["project"]), token=page_token,
                                     refresh_seconds=args.interval, browse_html=browse_html,
                                     selected_job=selected_job, interactive=True)
@@ -608,6 +676,14 @@ def make_server(args):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(str(exc).encode("utf-8"))
+
+        def _text(self, message, status):
+            body = message.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _json(self, payload, status=None):
             body = json.dumps(payload).encode("utf-8")
@@ -628,7 +704,12 @@ def cmd_watch(args):
     print("reliontree watch: %s (refreshing every %ds, Ctrl-C to stop)" % (url, args.interval))
     if not args.no_open:
         webbrowser.open(url)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print()
+    finally:
+        server.server_close()
 
 
 class BackgroundServer:
@@ -688,12 +769,14 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    from . import __version__
+    p.add_argument("--version", action="version", version="reliontree " + __version__)
     sub = p.add_subparsers(dest="cmd")
 
     def common(sp):
         sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
         sp.add_argument("--job", help="restrict to this job's upstream lineage, e.g. Class3D/job012")
-        sp.add_argument("--max-hops", type=int, default=None, help="limit upstream depth from --job")
+        sp.add_argument("--max-hops", type=_positive_int, default=None, help="limit upstream depth from --job (positive; omit for the whole lineage)")
         sp.add_argument("-o", "--out", help="output file (default: stdout, or tree.html for --format html)")
 
     sp = sub.add_parser("tree", help="job lineage as text/svg/html/json")
@@ -775,7 +858,7 @@ def _build_parser():
     sp = sub.add_parser("watch", help="live-refreshing local view (stdlib http.server, no Flask/Streamlit)")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
     sp.add_argument("--job", help="restrict to this job's upstream lineage")
-    sp.add_argument("--max-hops", type=int, default=None)
+    sp.add_argument("--max-hops", type=_positive_int, default=None)
     sp.add_argument("--port", type=int, default=8710)
     sp.add_argument("--interval", type=int, default=10, help="browser auto-refresh interval in seconds")
     sp.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
