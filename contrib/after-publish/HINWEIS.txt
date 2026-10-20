@@ -1,0 +1,2 @@
+Nach dem PyPI-Upload anwenden: git apply contrib/after-publish/README-after-pypi.patch
+(ersetzt den GitHub-Installationsblock im README durch uvx/pip/pipx reliontree). Vorher NICHT anwenden, sonst stimmt die README nicht.

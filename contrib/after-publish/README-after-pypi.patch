@@ -1,0 +1,26 @@
+--- a/README.md
++++ b/README.md
+@@ -22,10 +22,9 @@
+ Works on a workstation, an HPC login node (no X11, no root),
+ or a cloud VM, with the same single command.
+ 
+-reliontree is not on PyPI yet, so install it straight from GitHub:
+-
+ ```bash
+-uvx --from git+https://github.com/LUKASinScience/reliontree reliontree     # isolated environment, nothing left behind
++uvx reliontree                  # isolated environment, nothing left behind
++pip install reliontree          # or install it persistently (Python 3.9 or newer, no further dependencies)
+ ```
+ 
+ Run from inside (or under) a RELION project directory. Zero arguments:
+@@ -36,9 +35,7 @@
+ browser (a login node), use `reliontree tree --format html -o tree.html`
+ for the old single-file static export instead.
+ 
+-No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree reliontree` works the same way.
+-Want it installed persistently in an existing env:
+-`pip install "git+https://github.com/LUKASinScience/reliontree"` (Python 3.9 or newer, no further dependencies).
++No `uv`? `pipx run reliontree` works the same way. The development version: `pip install "git+https://github.com/LUKASinScience/reliontree"`.
+ 
+ ![reliontree — job tree view](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/screenshot-tree.png)
+ 
