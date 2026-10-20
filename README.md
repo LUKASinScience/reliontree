@@ -2,7 +2,7 @@
 
 One job, one cheese, one relentless mouse. Welcome to reliontree  — the map of the hunt.
 
-![the mouse's hunting journey across a job tree](docs/assets/mouse-hunt.gif)
+![the mouse's hunting journey across a job tree](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/mouse-hunt.gif)
 
 Full guide: [lukasinscience.github.io/reliontree](https://lukasinscience.github.io/reliontree/)
 
@@ -17,7 +17,7 @@ Standalone RELION job-lineage viewer. No ChimeraX, no third-party server
 framework, no GUI toolkit — the default path is a self-starting stdlib-only
 local server. 
 
-![reliontree — live browsing demo](docs/assets/demo.gif)
+![reliontree — live browsing demo](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/demo.gif)
 
 
 Works on a workstation, an HPC login node (no X11, no root),
@@ -41,7 +41,7 @@ No `uv`? `pipx run --spec git+https://github.com/LUKASinScience/reliontree relio
 Want it installed persistently in an existing env:
 `pip install "git+https://github.com/LUKASinScience/reliontree"` (Python 3.9 or newer, no further dependencies).
 
-![reliontree — job tree view](docs/assets/screenshot-tree.png)
+![reliontree — job tree view](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/screenshot-tree.png)
 
 
 
