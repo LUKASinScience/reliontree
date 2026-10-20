@@ -5,11 +5,11 @@ diagram. Pure — no Qt/ChimeraX dependency."""
 import csv
 import io
 
-COLUMNS = ["job", "type", "state", "parents", "resolution_angstrom", "n_particles"]
-HEADERS = ["Job", "Type", "State", "Parent(s)", "Resolution (Å)", "Particles"]
+COLUMNS = ["job", "alias", "type", "state", "parents", "resolution_angstrom", "n_particles"]
+HEADERS = ["Job", "Alias", "Type", "State", "Parent(s)", "Resolution (Å)", "Particles"]
 
 
-def history_rows(ordered_jobs, job_artifacts, job_parents, job_stats):
+def history_rows(ordered_jobs, job_artifacts, job_parents, job_stats, job_alias=None):
     """One plain dict per job, in `ordered_jobs`' order — easy to test and
     to feed to either table writer below."""
     rows = []
@@ -20,6 +20,7 @@ def history_rows(ordered_jobs, job_artifacts, job_parents, job_stats):
         parents = sorted(job_parents.get(job_id, ()))
         rows.append({
             "job": job_id,
+            "alias": (job_alias or {}).get(job_id, ""),
             "type": fam,
             "state": artifacts.get("state", "unknown"),
             "parents": ", ".join(parents),

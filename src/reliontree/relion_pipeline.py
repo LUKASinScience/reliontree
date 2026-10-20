@@ -59,24 +59,28 @@ def load_pipeline(project):
     procs = set()
     e_from, e_to = [], []
 
-    def ingest(text):
+    def ingest(text, skip=frozenset()):
+        # default_pipeline.star of the project is authoritative: per-job snapshots (older copies) may add jobs
+        # it lacks, but never edges of jobs it already lists (`skip`).
         t = parse_pipeline_star(text)
         for p in t["processes"]:
             name = p.get("_rlnPipeLineProcessName", "").strip().rstrip("/")
             if name:
                 procs.add(name)
-        e_from.extend(t["e_from"])
-        e_to.extend(t["e_to"])
+        keep = lambda r: r.get("_rlnPipeLineEdgeProcess", "").strip().rstrip("/") not in skip
+        e_from.extend(r for r in t["e_from"] if keep(r))
+        e_to.extend(r for r in t["e_to"] if keep(r))
 
     ps = project / "default_pipeline.star"
     if ps.exists():
         ingest(read(ps))
+    main_procs = frozenset(procs)
     for fam in sorted([d for d in project.iterdir() if d.is_dir()]):
         for jd in fam.glob("job*/"):
             for fn in ("job_pipeline.star", "default_pipeline.star"):
                 f = jd / fn
                 if f.exists():
-                    ingest(read(f))
+                    ingest(read(f), main_procs)
 
     node_to_prod = defaultdict(set)
     proc_to_in   = defaultdict(set)
@@ -118,6 +122,18 @@ def load_meta(project):
             meta[name] = {"alias": alias, "status": status,
                           "type": row.get("_rlnPipeLineProcessTypeLabel", "").strip().lower()}
     return meta
+
+
+def resolve_job(project, name, meta=None):
+    """Canonical job id for what a person typed: `Class3D/job012`, with or without a trailing slash, or RELION's alias
+    (`remove_junk_1`, also `Class3D/remove_junk_1`). Unknown names come back cleaned but unchanged."""
+    name = str(name).strip().rstrip("/")
+    if re.search(r"/job\d+$", name):
+        return name
+    meta = load_meta(project) if meta is None else meta
+    short = name.split("/")[-1]
+    hits = sorted(j for j, m in meta.items() if m["alias"] == short and (("/" not in name) or j.split("/")[0] == name.split("/")[0]))
+    return hits[0] if len(hits) == 1 else name
 
 
 _SPA_ONLY_TYPES = ("relion.motioncorr", "relion.ctffind", "relion.autopick", "relion.class2d", "relion.manualpick")

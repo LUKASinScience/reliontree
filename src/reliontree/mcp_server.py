@@ -62,12 +62,14 @@ class Project:
         except ValueError as exc:
             raise ToolError(str(exc))
 
-    def check_job(self, job, tree=None):
+    def check_job(self, job, tree=None, present=False):
         if not isinstance(job, str) or not _JOB_ID.fullmatch(job):
             raise ToolError("job must look like Class3D/job012, got %r" % (job,))
         tree = tree or self.tree()
         if job not in tree["parents"]:
             raise ToolError("job %s is not in this project's pipeline" % job)
+        if present and tree["artifacts"].get(job, {}).get("state") == "missing":
+            raise ToolError("job missing: %s is listed in the pipeline but its directory is not on disk" % job)
         return tree
 
 
@@ -115,7 +117,7 @@ def tool_lineage(project, args):
 
 
 def tool_why(project, args):
-    tree = project.check_job(args.get("job"))
+    tree = project.check_job(args.get("job"), present=True)
     return _jsonable(job_context(tree, args["job"]))
 
 
@@ -125,7 +127,7 @@ def tool_diff(project, args):
         raise ToolError("give between 2 and 12 jobs")
     tree = project.tree()
     for j in jobs:
-        project.check_job(j, tree)
+        project.check_job(j, tree, present=True)
     if len(jobs) == 2:
         return _jsonable(diff_options(tree["options"][jobs[0]], tree["options"][jobs[1]]))
     return _jsonable(diff_many_options({j: tree["options"][j] for j in jobs}))
@@ -148,6 +150,10 @@ def call_tool(project, name, args):
     handler = HANDLERS.get(name)
     if handler is None:
         return "unknown tool %r" % name, True
+    allowed = next(t["inputSchema"]["properties"] for t in TOOLS if t["name"] == name)
+    unknown = sorted(set(args or {}) - set(allowed))
+    if unknown:
+        return "unknown argument(s) for %s: %s (allowed: %s)" % (name, ", ".join(map(str, unknown)), ", ".join(allowed) or "none"), True
     try:
         text = json.dumps(handler(project, args or {}), indent=1, ensure_ascii=False)
     except ToolError as exc:

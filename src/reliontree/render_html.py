@@ -787,7 +787,8 @@ function selectJob(job) {{
   if (info.latest) chips.push("<span class=chip>&#9733; latest result</span>");
   if (info.best) chips.push("<span class=chip>&#9733; best resolution</span>");
   chips.push("<span class=chip>" + esc(info.state) + "</span>");
-  if (info.resolution_angstrom) chips.push("<span class=chip>" + info.resolution_angstrom.toFixed(1) + " &Aring;</span>");
+  if (info.resolution_angstrom) chips.push("<span class=chip>" + info.resolution_angstrom.toFixed(1) + " &Aring;" + (info.fsc_resolution ? " (RELION shell)" : "") + "</span>");
+  if (info.fsc_resolution) chips.push("<span class=chip>" + info.fsc_resolution.toFixed(2) + " &Aring; (FSC 0.143, interpolated)</span>");
   if (info.n_particles) chips.push("<span class=chip>" + info.n_particles.toLocaleString('en-US') + " particles</span>");
   const runtime = formatDuration(info.runtime_seconds);
   if (runtime) chips.push("<span class=chip>" + runtime + "</span>");
@@ -1033,6 +1034,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "fsc": fsc_curves(tree["job_dirs"][job]) if job_type(job) in ("PostProcess", "Refine3D") else None,
             "maps": _maps_of[job], "cardmaps": card_maps(_maps_of[job]), "bild": [p.name for _, p in sorted(_class_files(tree["job_dirs"][job]).items())],
             "resolution_angstrom": stats.get("resolution_angstrom"),
+            "fsc_resolution": tree.get("best_fsc") if job == tree["best"] else None,
             "n_particles": stats.get("n_particles"),
             "runtime_seconds": stats.get("runtime_seconds"),
             "parents": sorted(tree["parents"].get(job, [])),
@@ -1046,7 +1048,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
                 if tree["classes"].get(thumb_job) else []),
             "classes": tree["classes"].get(job, []),
         }
-    rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"])
+    rows = history_rows(ordered_jobs(tree), tree["artifacts"], tree["parents"], tree["stats"], tree.get("alias"))
     type_colors = {
         job: JOB_TYPE_COLORS.get(job_type(job), DEFAULT_TYPE_COLOR)
         for job in ordered_jobs(tree)

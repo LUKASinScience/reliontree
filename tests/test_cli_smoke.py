@@ -276,3 +276,56 @@ def test_settings_command_roundtrip(tmp_path, monkeypatch, capsys):
     cli.main(["settings", "--chimerax", "cx", "--run-first", "module load chimerax", "--template", "Mask overlay"])
     out = json.loads(capsys.readouterr().out)
     assert out["settings"] == {"chimerax_cmd": "cx", "prelaunch": "module load chimerax", "figure_template": "Mask overlay"}
+
+
+def _run_cli(*argv, **kw):
+    import subprocess, sys
+    return subprocess.run([sys.executable, "-c", "import sys; from reliontree.cli import main; main(sys.argv[1:])", *argv],
+                          capture_output=True, text=True, timeout=60, **kw)
+
+
+def test_missing_or_broken_project_is_an_error_but_empty_project_is_fine(tmp_path):
+    for sub in ("tree", "table", "methods"):
+        r = _run_cli(sub, str(tmp_path))                                  # no default_pipeline.star
+        assert r.returncode == 1 and "no RELION project found" in r.stderr and not r.stdout.strip()
+    star = tmp_path / "default_pipeline.star"
+    for content in ("", "data_pipeline_general\n_rlnPipeLineJobCounter 1", "\x00\xff garbage"):     # empty, cut off mid-line, not a STAR file
+        star.write_text(content)
+        r = _run_cli("tree", str(tmp_path))
+        assert r.returncode == 2 and "reliontree:" in r.stderr, content
+    star.write_text("data_pipeline_general\n_rlnPipeLineJobCounter 1\n")    # valid, just no jobs yet: empty output is correct
+    assert _run_cli("tree", str(tmp_path)).returncode == 0
+
+
+def test_real_relion_pipeline_file_layout_is_accepted(tmp_path):
+    # Real files (RELION 3/4/5) start with a blank line + "# version NNNNN" and end with a space, not a newline
+    star = "\n# version 50001\n\ndata_pipeline_general\n\n_rlnPipeLineJobCounter                       1\n \n"[:-1]
+    assert not star.startswith("data_") and not star.endswith("\n")
+    (tmp_path / "default_pipeline.star").write_text(star)
+    r = _run_cli("tree", str(tmp_path))
+    assert r.returncode == 0 and not r.stderr.strip(), r.stderr
+
+
+def test_maps_unknown_job_exits_2(tmp_path):
+    (tmp_path / "default_pipeline.star").write_text("data_pipeline_general\n_rlnPipeLineJobCounter 1\n")
+    r = _run_cli("maps", str(tmp_path), "--job", "nosuch/job9")
+    assert r.returncode == 2 and "not found" in r.stderr
+
+
+def test_watch_ctrl_c_exits_cleanly(tmp_path):
+    import signal, socket, subprocess, sys, time
+    (tmp_path / "default_pipeline.star").write_text("data_pipeline_general\n_rlnPipeLineJobCounter 1\n")
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    p = subprocess.Popen([sys.executable, "-c", "import sys; from reliontree.cli import main; main(sys.argv[1:])", "watch", str(tmp_path),
+                          "--port", str(port), "--no-open"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    deadline = time.time() + 60
+    while True:                                                           # wait until the server listens
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+            break
+        except OSError:
+            assert p.poll() is None and time.time() < deadline
+            time.sleep(0.2)
+    p.send_signal(signal.SIGINT)
+    _, err = p.communicate(timeout=30)
+    assert p.returncode == 0 and "Traceback" not in err
