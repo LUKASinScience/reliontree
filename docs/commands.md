@@ -36,6 +36,9 @@ reliontree tree . --job Class3D/job012         # just that job's upstream lineag
 reliontree tree . --job Class3D/job012 --max-hops 3
 ```
 
+`--job` accepts a job id (with or without a trailing slash) or RELION's alias (`--job remove_junk_1`).
+`--max-hops` must be a positive integer (0 or negative is an error, exit 2); leave it out for the whole lineage.
+
 `--format json` is the integration point for scripts or AI agents: a
 structured graph (`jobs`, `parents`, `artifacts`, `stats`) instead of text to
 parse, with defined exit codes (see below).

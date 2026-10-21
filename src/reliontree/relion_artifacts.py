@@ -38,7 +38,8 @@ def scan_job_artifacts(job_dir):
         "half_map_2": None,
         "mask": None,
     }
-    for name in names:
+    latest_key = None
+    for name in sorted(names):
         lowered = name.lower()
         full = job_dir / name
         if lowered == "postprocess.mrc":
@@ -47,11 +48,27 @@ def scan_job_artifacts(job_dir):
             artifacts["half_map_1"] = full
         elif re.fullmatch(r"run_half2_class\d+_unfil\.mrc", lowered):
             artifacts["half_map_2"] = full
-        elif re.fullmatch(r"run_(it\d+_)?class\d+\.mrc", lowered) and artifacts["latest_map"] is None:
-            artifacts["latest_map"] = full
+        elif re.fullmatch(r"run_(it\d+_)?class\d+\.mrc", lowered):
+            m = re.fullmatch(r"run_(?:it(\d+)_)?class(\d+)\.mrc", lowered)
+            # highest iteration wins (numeric); a final run_classNNN without it counts as above any iteration
+            key = (int(m.group(1)) if m.group(1) else 10 ** 9, -int(m.group(2)))
+            if latest_key is None or key > latest_key:
+                latest_key, artifacts["latest_map"] = key, full
         elif lowered.endswith(".mrc") and "mask" in lowered and artifacts["mask"] is None:
             artifacts["mask"] = full
     return artifacts
+
+
+def nr_classes(job_dir):
+    """Number of classes the job's newest `run_*model.star` declares (`_rlnNrClasses`), or None. Leftover class maps of an
+    earlier run with more classes can sit in the same directory; this is what tells them apart."""
+    try:
+        models = sorted(job_dir.glob("run_it*_model.star")) or [job_dir / "run_model.star"]
+        with open(models[-1], encoding="utf-8", errors="ignore") as fh:
+            m = re.search(r"^_rlnNrClasses\s+(\d+)", fh.read(20000), re.M)
+        return int(m.group(1)) if m else None
+    except OSError:
+        return None
 
 
 def list_class_maps(job_dir):
@@ -76,7 +93,8 @@ def list_class_maps(job_dir):
         if class_num not in by_class or iteration > by_class[class_num][0]:
             by_class[class_num] = (iteration, job_dir / name)
 
-    return [by_class[c][1] for c in sorted(by_class)]
+    limit = nr_classes(job_dir) if by_class else None
+    return [by_class[c][1] for c in sorted(by_class) if limit is None or c <= limit]
 
 
 def list_class_stack(job_dir):
