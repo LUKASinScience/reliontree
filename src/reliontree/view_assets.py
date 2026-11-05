@@ -326,7 +326,8 @@ function renderPathPanel(a, b) {
   panel.innerHTML = head("<b>Path A vs. B</b> &middot; " + shared.length + " shared jobs" +
     (fork ? ", paths diverge after <b>" + esc(jobName(fork)) + "</b>" : ", no common ancestor")) +
     (!panelOpen ? "" : "<table><tr><th class=a>A &middot; " + onlyA.length + " own jobs</th><th class=b>B &middot; " + onlyB.length + " own jobs</th></tr>" +
-    "<tr><td class=a>" + endCell(endA) + "</td><td class=b>" + endCell(endB) + "</td></tr>" + rows + "</table>" + chg);
+    "<tr><td class=a>" + endCell(endA) + "</td><td class=b>" + endCell(endB) + "</td></tr>" + rows + "</table>" + chg +
+    (INTERACTIVE && mainMap(endA) && mainMap(endB) ? "<p><button onclick='openBrowserCompare([\\"" + endA + "\\",\\"" + endB + "\\"])' title='main maps of A and B side by side in the browser (difference available there)'>\\u25b6 compare maps in 3D (browser)</button></p>" : ""));
 }
 fillPathPick();
 function restorePaths() {

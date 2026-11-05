@@ -27,6 +27,7 @@ import json
 import os
 import re
 import secrets
+import gzip
 import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,6 +38,8 @@ from . import chimerax_bridge
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .relion_classes import class_iter_thumbs, class_overlap
 from .relion_maps import list_job_maps
+from .relion_volume import volume_payload
+from .view3d_page import render_view3d
 from .relion_diff import diff_options, diff_many_options, job_context
 from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
@@ -487,6 +490,76 @@ def _open_3d(query, project):
         return {"error": str(exc)}
 
 
+MAX_VIEW_JOBS = 3      # main job + (compare job) + mask/colour job: every one a validated job id, never a raw path
+_PNG_NAME = re.compile(r"[\w.\-]+\.png")
+
+
+def _ref(value, default_job, project):
+    """(job, basename) for `name.mrc` (in `default_job`) or `Type/jobNNN:name.mrc`; ValueError on anything else."""
+    job, sep, name = value.rpartition(":")
+    job = job.rstrip("/") if sep else default_job
+    if not _JOB_ID.fullmatch(job or ""):
+        raise ValueError("bad job id %r" % job)
+    if not _MAP_FILE.fullmatch(name) or name.lower().endswith(".bild"):
+        raise ValueError("bad file name")
+    if not (project / job / name).is_file():
+        raise ValueError("no such map in %s" % job)
+    return job, name
+
+
+def _view_request(query, project):
+    """(default_job, maps, mask, color) of a /view3d or /volume request; maps are 'name' (default job) or 'job:name'
+    strings, mask/color the same or None. At most MAX_VIEW_JOBS distinct jobs. ValueError on anything invalid."""
+    job = query.get("job", [""])[0].rstrip("/")
+    names = query.get("f", [])
+    if not names or len(names) > 12:
+        raise ValueError("bad file name")
+    job = job or names[0].rpartition(":")[0].rstrip("/")
+    out, jobs = {}, set()
+
+    def one(v):
+        j, n = _ref(v, job, project)
+        jobs.add(j)
+        return n if j == job else "%s:%s" % (j, n)
+
+    maps = [one(v) for v in names]
+    for key in ("mask", "color"):
+        out[key] = one(query[key][0]) if query.get(key, [""])[0] else None
+    if len(jobs) > MAX_VIEW_JOBS:
+        raise ValueError("maps from at most %d jobs per view" % MAX_VIEW_JOBS)
+    return job, maps, out["mask"], out["color"]
+
+
+def _job_map_files(query, project):
+    """(job, [names]) of the .mrc/.map files a /view3d or /volume request names; ValueError on anything else."""
+    return _view_request(query, project)[:2]
+
+
+def _volume(query, project):
+    """Gzipped 8-bit cube of one map (see relion_volume.py) for the in-browser 3D view."""
+    job, names, _, _ = _view_request(query, project)
+    try:
+        detail = min(256, max(32, int(query.get("detail", ["128"])[0])))
+    except ValueError:
+        raise ValueError("bad detail")
+    j, n = _ref(names[0], job, project)
+    payload = volume_payload(project / j / n, detail)
+    if payload is None:
+        raise ValueError("not a float32 MRC map: %s" % n)
+    return gzip.compress(payload, 3)
+
+
+def _render_png(query, project):
+    """Bytes of a PNG that `reliontree render` left in <project>/.reliontree/renders (basename only, nothing else)."""
+    name = query.get("f", [""])[0]
+    if not _PNG_NAME.fullmatch(name):
+        raise ValueError("bad file name")
+    try:
+        return (project / ".reliontree" / "renders" / name).read_bytes()
+    except OSError:
+        raise ValueError("no such render")
+
+
 def _api(route, query, project):
     """JSON for the page's lazy requests: per-iteration class thumbnails and
     two-job particle overlap. Job ids are matched against a strict pattern
@@ -595,7 +668,7 @@ def make_server(args):
                 query = parse_qs(urlsplit(self.path).query)
                 error = None
                 route = urlsplit(self.path).path
-                if route not in ("/", "/open-3d", "/settings", "/settings-check", "/class-thumbs", "/overlap", "/orientation"):
+                if route not in ("/", "/open-3d", "/settings", "/settings-check", "/class-thumbs", "/overlap", "/orientation", "/view3d", "/volume", "/render", "/view3d-state"):
                     self._text("not found: %s" % route, 404)
                     return
                 if ("open" in query or "browse" in query) and not self._authorized(query.get("t", [""])[0]):
@@ -623,6 +696,34 @@ def make_server(args):
                         self._json({"ok": ok, "text": text})
                     elif state["project"] is not None:
                         self._json(_open_3d(query, state["project"]))
+                    return
+                if route in ("/view3d", "/volume", "/render", "/view3d-state"):
+                    if not self._authorized(query.get("t", [""])[0]) or state["project"] is None:
+                        self._deny()
+                        return
+                    try:
+                        if route == "/volume":
+                            body, ctype, enc = _volume(query, state["project"]), "application/octet-stream", "gzip"
+                        elif route == "/render":
+                            body, ctype, enc = _render_png(query, state["project"]), "image/png", None
+                        elif route == "/view3d-state":      # the page tells `reliontree render` how it ended: ready / nogl / failed
+                            server.view_state = re.sub(r"[^\w .:,/\-]", "", query.get("s", [""])[0])[:200]
+                            body, ctype, enc = b"ok", "text/plain", None
+                        else:
+                            job, names, mask, color = _view_request(query, state["project"])
+                            body = render_view3d(job, names, page_token, mask=mask, color=color,
+                                                 render=os.environ.get("RELIONTREE_RENDER", "auto")).encode("utf-8")
+                            ctype, enc = "text/html; charset=utf-8", None
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, status=400)
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    if enc:
+                        self.send_header("Content-Encoding", enc)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                     return
                 if route in ("/class-thumbs", "/overlap", "/orientation") and state["project"] is not None:
                     self._json(_api(route, query, state["project"]))
@@ -696,7 +797,73 @@ def make_server(args):
         def log_message(self, format, *a):
             pass  # keep stdout clean; errors still surface via the page
 
-    return ThreadingHTTPServer(("127.0.0.1", args.port), Handler), "http://127.0.0.1:%d/" % args.port
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.page_token, server.view_state = page_token, ""
+    return server, "http://127.0.0.1:%d/" % args.port
+
+
+def cmd_render(args):
+    """Headless-Chrome PNGs of the 3D view (no display needed). Server + browser live only for this call."""
+    import socket
+    from . import relion_render as rr
+    project = _project(args)
+    chrome = rr.find_chrome(args.chrome)
+    if not chrome:
+        raise ValueError("no Chrome/Chromium found (looked on PATH and in /Applications); pass --chrome PATH. "
+                         "Nothing was rendered. Tip: google-chrome, chromium or a conda 'chromium' package all work.")
+    if args.level != "auto":
+        float(args.level)       # ValueError -> exit 2
+    jobs = [j.rstrip("/") for j in (args.job or [])] or rr.default_jobs(project)
+    if not jobs:
+        raise ValueError("no job with a map to render in %s" % project)
+    mode = args.render if args.render != "auto" else os.environ.get("RELIONTREE_RENDER", "auto")
+    mode = mode if mode in ("auto", "gpu", "soft") else "auto"
+    out_dir = Path(args.out) if args.out else project / rr.RENDER_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    angles = [(args.rx, (args.ry + 360.0 * i / args.turntable) % 360) for i in range(args.turntable)] if args.turntable > 1 else [(args.rx, args.ry)]
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    bg = start_background(project, port=port)
+    done = skipped = failed = 0
+    try:
+        token = bg.server.page_token
+        for job in jobs:
+            if not _JOB_ID.fullmatch(job):
+                print("skip %s: not a job id" % job, file=sys.stderr)
+                failed += 1
+                continue
+            files = rr.job_files(project, job)
+            if not files:
+                print("skip %s: no map" % job, file=sys.stderr)
+                failed += 1
+                continue
+            cols, rows = rr.tile_shape(len(files))
+            for rx, ry in angles:
+                out = out_dir / rr.out_name(job, files, rx, ry, args.size, args.level)
+                if not args.force and rr.is_fresh(out, project, job, files):
+                    skipped += 1
+                    continue
+                ok = False
+                for soft in ([False, True] if mode == "auto" else [mode == "soft"]):
+                    bg.server.view_state = ""
+                    url = rr.view_url(bg.url, token, job, files, rx, ry, args.level, "soft" if soft else ("gpu" if mode == "gpu" else "auto"))
+                    ok = rr.shoot(chrome, url, out, args.size * cols, args.size * rows, soft)
+                    ok = ok and bg.server.view_state.startswith("ready")
+                    if ok:
+                        break
+                    out.unlink(missing_ok=True)
+                if ok:
+                    done += 1
+                    print("wrote %s  (%s)" % (out, bg.server.view_state[:60]))
+                else:
+                    failed += 1
+                    print("failed: %s (page said %r)" % (job, bg.server.view_state), file=sys.stderr)
+    finally:
+        bg.stop()
+    print("render: %d written, %d up to date, %d failed -> %s" % (done, skipped, failed, out_dir))
+    if failed and not done and not skipped:
+        sys.exit(1)
 
 
 def cmd_watch(args):
@@ -863,6 +1030,20 @@ def _build_parser():
     sp.add_argument("--interval", type=int, default=10, help="browser auto-refresh interval in seconds")
     sp.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
     sp.set_defaults(func=cmd_watch)
+
+    sp = sub.add_parser("render", help="headless Chrome PNGs of the 3D view of jobs' main maps (no display needed; works in a batch script)")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--job", action="append", help="job id such as Refine3D/job012 (repeatable; default: every job with a main map)")
+    sp.add_argument("--out", help="output directory (default: <project>/.reliontree/renders)")
+    sp.add_argument("--chrome", help="Chrome/Chromium executable (default: look on PATH and in /Applications)")
+    sp.add_argument("--render", choices=("auto", "gpu", "soft"), default="auto", help="auto: GPU first, software (SwiftShader) if WebGL fails")
+    sp.add_argument("--size", type=_positive_int, default=800, help="pixels per map tile (default 800)")
+    sp.add_argument("--rx", type=float, default=0.0, help="start rotation about x in degrees")
+    sp.add_argument("--ry", type=float, default=0.0, help="start rotation about y in degrees")
+    sp.add_argument("--level", default="auto", help="surface level in map units, or auto")
+    sp.add_argument("--turntable", type=int, default=0, metavar="N", help="N pictures around the y axis, starting at --ry")
+    sp.add_argument("--force", action="store_true", help="redraw even if the PNG is newer than the maps")
+    sp.set_defaults(func=cmd_render)
 
     sp = sub.add_parser("mcp", help="read-only MCP server (stdio) over a RELION project, for AI assistants")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
