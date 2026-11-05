@@ -62,3 +62,11 @@ def test_page_escapes_values():
     from reliontree.view3d_page import render_view3d
     page = render_view3d("Class3D/job001", ["a</script>.mrc"], "tok")
     assert "</script>.mrc" not in page and "\\u003c/script>.mrc" in page
+
+
+def test_flat_map_gives_an_empty_cube(tmp_path, monkeypatch):
+    monkeypatch.setattr(relion_volume, "_CACHE_DIR", tmp_path / "cache")
+    head = bytearray(1024); head[:16] = struct.pack("<4i", 4, 4, 4, 2); head[28:40] = struct.pack("<3i", 4, 4, 4); head[40:52] = struct.pack("<3f", 4, 4, 4)
+    (tmp_path / "flat.mrc").write_bytes(bytes(head) + struct.pack("<f", 0.5) * 64)
+    p = relion_volume.volume_payload(tmp_path / "flat.mrc")
+    assert p is not None and set(p[relion_volume.HEADER.size:]) == {0}

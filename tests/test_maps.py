@@ -79,3 +79,10 @@ def test_real_dump_still_rejected(tmp_path):
     for i in range(80):
         (tmp_path / ("part%03d.mrc" % i)).write_text("x")
     assert list_job_maps(tmp_path) == []
+
+
+def test_external_reconstruct_working_files_do_not_hide_the_classes(tmp_path):
+    names = ["run_it%03d_class%03d.mrc" % (i, c) for i in (24, 25) for c in (1, 2)]
+    names += ["run_it%03d_class%03d_external_reconstruct%s.mrc" % (i, c, s) for i in range(1, 26) for c in (1, 2) for s in ("", "_weight", "_data_real")]
+    names.append("run_it025_class001_box64.mrc")
+    assert labels(list_job_maps(_job(tmp_path, *names))) == ["All 2 classes (it 25)"]

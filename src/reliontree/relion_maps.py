@@ -32,6 +32,8 @@ def list_job_maps(job_dir):
         names = sorted(f.name for f in Path(job_dir).iterdir() if f.is_file() and f.suffix.lower() in MAP_SUFFIXES)
     except OSError:
         return []
+    # working files of external reconstruction (run_itNNN_classNNN_external_reconstruct*.mrc, *_boxNNN.mrc) are not maps to show
+    names = [n for n in names if "_external_reconstruct" not in n and not re.search(r"_box\d+\.", n)]
     # per-iteration class/half maps (run_itNNN_*) are normal in a long classification: they do not count as a "dump"
     core = [n for n in names if not _CLASS_IT.fullmatch(n) and not _HALF_IT.fullmatch(n)]
     if not names or len(core) > MAX_MAP_FILES or len(names) > MAX_ITER_FILES:

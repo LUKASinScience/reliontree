@@ -76,8 +76,10 @@ def _build(path, max_dim):
 
     lo = min(min(r) for r in rows)
     hi = max(max(r) for r in rows)
-    if not (hi > lo):  # flat (or NaN) map: nothing to show
+    if lo != lo or hi != hi:  # NaN
         return None
+    if not hi > lo:  # flat map (an emptied class): an all-zero cube, so the other maps still load
+        hi = lo + 1.0
     k = 255.0 / (hi - lo)
     cube = bytearray()
     for r in rows:
