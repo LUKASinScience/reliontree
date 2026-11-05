@@ -41,6 +41,14 @@ an HPC login node (no X11, no root) or a cloud VM.
 
     [Comparing jobs](compare.md)
 
+-   :material-rotate-3d-variant: **Built-in 3D viewer**
+
+    ---
+
+    All classes of a job side by side in the browser, with projections, sections, dust removal and PNG export. Nothing to install.
+
+    [ChimeraX and 3D](chimerax.md)
+
 -   :material-cube-outline: **Open maps in ChimeraX**
 
     ---

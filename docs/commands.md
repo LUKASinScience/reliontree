@@ -14,6 +14,7 @@ All commands take the project directory as first argument (default: found from t
 | `why --job X` | why a job exists |
 | `maps --job X` | the maps a job holds |
 | `open --job X [--map label] [--template name]` | open maps in the one ChimeraX window |
+| `render [--job X] [--out DIR] [--turntable N] [--render auto\|gpu\|soft]` | PNGs of the 3D view through headless Chrome (needs Chrome or Chromium) |
 | `settings [--chimerax ..] [--run-first ..] [--template ..] [--check]` | how ChimeraX is started |
 | `analyze` | optional relion-origin checks shown on the cards |
 | `plan plan.json [--apply]` | new jobs from a plan file; dry run unless `--apply` |

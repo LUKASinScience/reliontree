@@ -60,6 +60,7 @@ reliontree why --job Refine3D/job042          # parent, siblings, what changed f
 reliontree compare --job Refine3D/job039 --job Refine3D/job042   # options + resolution/particles/maps + class overlap
 reliontree maps --job Refine3D/job042         # which maps a job holds
 reliontree open --job Refine3D/job042 --map mask   # open in the one ChimeraX window
+reliontree render --job Class3D/job012        # PNGs of the maps through headless Chrome (needs Chrome)
 reliontree settings --run-first "module load chimerax" --check
 reliontree analyze                            # optional: relion-origin checks -> pills on the job cards
 reliontree plan plan.json                     # dry run: new jobs as diffs against existing ones; --apply registers them as Scheduled (needs relion_pipeliner)
@@ -95,6 +96,35 @@ More in the live view:
 Exit codes for the `tree`/`table`/`methods`/`diff`/`why` subcommands (for scripting):
 `0` ok, `1` no RELION project found, `2`
 parse/job-lookup error.
+
+## Built-in 3D viewer (no ChimeraX needed)
+
+Open a job's Details drawer in `reliontree watch`: below the 2D classes sits a 3D view of the job's maps, drawn in the
+browser (WebGL2, nothing to install, no new tab). A classification shows all its classes side by side, each in the
+colour of its class card, with a shared rotation; a refinement shows its main map. **Open in ChimeraX** stays one click
+away in the viewer header.
+
+![reliontree — class cards with projections and sections](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/screenshot-classes.png)
+
+Each class card shows the map's mean projections (top) and central sections (bottom) along XY, XZ and YZ next to the 2D
+thumbnail; click them to open the sections in the viewer, with a slider per axis. Classes can be sorted by share and
+nearly empty ones hidden.
+
+![reliontree — built-in 3D viewer, four classes](https://raw.githubusercontent.com/LUKASinScience/reliontree/main/docs/assets/screenshot-3d-viewer.png)
+
+In the viewer: **show** 3D, central sections or mean projections; **level** (each map starts at its own level so none
+is empty; "same level" uses one real-unit level for all); **cut**; **hide dust** (drops small floating blobs);
+**smooth**; **light** simple/soft; **style** default/paper/clay/depth; white background; PNG export. Compare two maps as
+a difference (orange/blue), show a mask as a see-through shell, or colour a map by local resolution.
+`reliontree render` writes the same views as PNG files (and turntables) through headless Chrome, for papers and
+reports; results are cached under `.reliontree/renders/`.
+
+*Screenshots: RELION 5 tutorial data (β-galactosidase, JEOL CRYO ARM 200, recorded by T. Kato, N. Terahara and K. Namba,
+Osaka University; full data set [EMPIAR-10204](https://www.ebi.ac.uk/empiar/EMPIAR-10204/), DOI
+[10.6019/EMPIAR-10204](https://doi.org/10.6019/EMPIAR-10204), CC0) processed with
+[RELION](https://relion.readthedocs.io) following its
+[tutorial](https://relion.readthedocs.io/en/latest/SPA_tutorial/Introduction.html); only the precalculated results are shown.
+If you use RELION, please cite it as described on its website, e.g. Scheres SHW, *J. Struct. Biol.* 180, 519 (2012).*
 
 ## Open maps in ChimeraX (3D buttons)
 
