@@ -502,7 +502,8 @@ def _ref(value, default_job, project):
         raise ValueError("bad job id %r" % job)
     if not _MAP_FILE.fullmatch(name) or name.lower().endswith(".bild"):
         raise ValueError("bad file name")
-    if not (project / job / name).is_file():
+    f = project / job / name
+    if not f.is_file() or not f.resolve().is_relative_to(project.resolve()):
         raise ValueError("no such map in %s" % job)
     return job, name
 
@@ -555,7 +556,10 @@ def _render_png(query, project):
     if not _PNG_NAME.fullmatch(name):
         raise ValueError("bad file name")
     try:
-        return (project / ".reliontree" / "renders" / name).read_bytes()
+        f = (project / ".reliontree" / "renders" / name).resolve()
+        if not f.is_relative_to((project / ".reliontree" / "renders").resolve()):
+            raise OSError("outside the renders folder")
+        return f.read_bytes()
     except OSError:
         raise ValueError("no such render")
 

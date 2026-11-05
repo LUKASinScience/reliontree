@@ -5,6 +5,8 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 
+_SAFE_JOB = re.compile(r"[A-Za-z0-9_]+/job[0-9]+")
+
 def parse_pipeline_star(text):
     """Extract process and edge tables from a pipeline STAR file."""
     # RELION >= 4 names the type/status columns `...TypeLabel` / `...StatusLabel` (text); RELION 3.x wrote
@@ -65,7 +67,7 @@ def load_pipeline(project):
         t = parse_pipeline_star(text)
         for p in t["processes"]:
             name = p.get("_rlnPipeLineProcessName", "").strip().rstrip("/")
-            if name:
+            if name and _SAFE_JOB.fullmatch(name):   # the name ends up in page attributes and scripts
                 procs.add(name)
         keep = lambda r: r.get("_rlnPipeLineEdgeProcess", "").strip().rstrip("/") not in skip
         e_from.extend(r for r in t["e_from"] if keep(r))
@@ -118,7 +120,7 @@ def load_meta(project):
         alias = "" if alias in ("", "None") else alias.split("/")[-1]
         label = row.get("_rlnPipeLineProcessStatusLabel", "").strip().lower()
         status = _PIPELINE_STATUS.get(label) or _PIPELINE_STATUS_CODE.get(row.get("_rlnPipeLineProcessStatus", "").strip(), "")
-        if name:
+        if name and _SAFE_JOB.fullmatch(name):
             meta[name] = {"alias": alias, "status": status,
                           "type": row.get("_rlnPipeLineProcessTypeLabel", "").strip().lower()}
     return meta

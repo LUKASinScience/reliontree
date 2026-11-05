@@ -7,14 +7,18 @@ voxels along the longest axis; only the rows that are kept are read from disk.
 """
 import array
 import hashlib
+import math
 import os
+import stat
 import struct
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 HEADER = struct.Struct("<3HH3f")
-_CACHE_DIR = Path(os.environ.get("RELIONTREE_CACHE_DIR") or (Path(tempfile.gettempdir()) / "reliontree-thumb-cache"))
+_CACHE_DIR = Path(os.environ.get("RELIONTREE_CACHE_DIR") or (Path(tempfile.gettempdir()) / ("reliontree-thumb-cache-%d" % os.getuid() if hasattr(os, "getuid") else "reliontree-thumb-cache")))
+_BUILD = threading.Lock()   # one cube is built at a time: pure-Python work, several browsers must not pile up threads on it
 
 
 def _cache_file(path, stat, max_dim):
@@ -22,25 +26,50 @@ def _cache_file(path, stat, max_dim):
     return _CACHE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".vol")
 
 
+def _read_cache(cache):
+    """The cached cube, or None when missing or not the size its own header promises."""
+    try:
+        hit = cache.read_bytes()
+        if len(hit) >= HEADER.size and len(hit) == HEADER.size + math.prod(HEADER.unpack(hit[:HEADER.size])[:3]):
+            return hit
+    except (OSError, struct.error):
+        pass
+    return None
+
+
 def volume_payload(path, max_dim=128):
     """bytes (header + cube) or None if the file is missing, not float32 MRC, or implausible. Cached on disk."""
     try:
-        stat = os.stat(path)
+        stat_ = os.stat(path)
     except OSError:
         return None
-    cache = _cache_file(str(path), stat, max_dim)
+    cache = _cache_file(str(path), stat_, max_dim)
+    hit = _read_cache(cache)
+    if hit is not None:
+        return hit
+    with _BUILD:
+        hit = _read_cache(cache)     # built meanwhile by the request that held the lock
+        if hit is not None:
+            return hit
+        payload = _build(path, max_dim)
+    if payload is not None:
+        _store(cache, payload)
+    return payload
+
+
+def _store(cache, payload):
+    """Write the cache file atomically into a private (0700, own) directory; any doubt = no caching (it is only a speedup)."""
     try:
-        return cache.read_bytes()
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        st = os.lstat(_CACHE_DIR)
+        if not stat.S_ISDIR(st.st_mode) or (hasattr(os, "getuid") and st.st_uid != os.getuid()) or st.st_mode & 0o077:
+            return
+        fd, tmp = tempfile.mkstemp(dir=_CACHE_DIR, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(payload)
+        os.replace(tmp, cache)
     except OSError:
         pass
-    payload = _build(path, max_dim)
-    if payload is not None:
-        try:
-            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            cache.write_bytes(payload)
-        except OSError:
-            pass  # the cache is only a speedup
-    return payload
 
 
 def _build(path, max_dim):

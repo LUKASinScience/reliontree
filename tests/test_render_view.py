@@ -8,7 +8,7 @@ import urllib.request
 
 import pytest
 
-from reliontree import cli, relion_render, relion_volume
+from reliontree import cli, relion_pipeline, relion_render, relion_volume
 from reliontree.render_html import _renders_of
 from reliontree.view3d_page import render_view3d
 from test_volume_view import _write_mrc
@@ -190,3 +190,38 @@ def test_ui_hooks_in_interactive_page(proj):
     page = render_html(build_tree(proj), interactive=True, token="tok")
     for needle in ("openBrowserCompare", "view3dUrl", "ev.shiftKey", "compare maps in 3D (browser)", "/render?t="):
         assert needle in page
+
+
+def test_symlinks_cannot_leave_the_project(proj, tmp_path):
+    outside = tmp_path / "secret.mrc"
+    _write_mrc(outside, 12)
+    (proj / "Refine3D" / "job001" / "evil.mrc").symlink_to(outside)
+    with pytest.raises(ValueError):
+        cli._ref("evil.mrc", "Refine3D/job001", proj)
+    d = proj / ".reliontree" / "renders"
+    d.mkdir(parents=True)
+    (d / "Refine3D_job001_evil.png").symlink_to(tmp_path / "secret.mrc")
+    with pytest.raises(ValueError):
+        cli._render_png({"f": ["Refine3D_job001_evil.png"]}, proj)
+
+
+def test_cache_is_private_atomic_and_size_checked(proj, tmp_path):
+    p = proj / "Refine3D" / "job001" / "run_class001.mrc"
+    first = relion_volume.volume_payload(p, 64)
+    cdir = tmp_path / "cache"
+    assert (cdir.stat().st_mode & 0o777) == 0o700 and not list(cdir.glob("*.tmp"))
+    (f,) = cdir.glob("*.vol")
+    f.write_bytes(first[:-5])                          # truncated cache file: rebuilt, not served
+    assert relion_volume.volume_payload(p, 64) == first
+    cdir.chmod(0o755)                                  # not private any more: still answers, but does not write there
+    f.unlink()
+    assert relion_volume.volume_payload(p, 64) == first and not list(cdir.glob("*.vol"))
+
+
+def test_foreign_job_names_with_quotes_are_dropped(tmp_path):
+    star = 'data_pipeline_processes\n\nloop_\n_rlnPipeLineProcessName #1\n_rlnPipeLineProcessAlias #2\n_rlnPipeLineProcessTypeLabel #3\n_rlnPipeLineProcessStatusLabel #4\n' \
+           "Import/job001/ None relion.import Succeeded\nX'onmouseover='alert(1)/job002/ None relion.import Succeeded\n"
+    (tmp_path / "default_pipeline.star").write_text(star)
+    procs = relion_pipeline.load_pipeline(tmp_path)[0]
+    assert "Import/job001" in procs and not any("'" in j for j in procs)
+    assert not any("'" in j for j in relion_pipeline.load_meta(tmp_path))

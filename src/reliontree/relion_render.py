@@ -91,8 +91,16 @@ def shoot(chrome, url, out, w, h, soft, timeout=300):
     out = Path(out)
     out.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="reliontree-chrome-") as prof:
+        # own process group: on a timeout Chrome's GPU/renderer children must die with it, or they keep the profile alive
+        proc = subprocess.Popen(chrome_cmd(chrome, url, out, w, h, soft, prof), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=(os.name == "posix"))
         try:
-            subprocess.run(chrome_cmd(chrome, url, out, w, h, soft, prof), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, 9) if os.name == "posix" else proc.kill()
+            except OSError:
+                pass
+            proc.wait()
             return False
     return out.is_file() and out.stat().st_size > 0
