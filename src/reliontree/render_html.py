@@ -4,6 +4,7 @@ HTML page. No JS framework, no server required — opens directly via
 
 import html
 import json
+from pathlib import Path
 
 from .view_assets import VIEW_CSS, VIEW_JS
 from .relion_maps import RANK_MASK, card_maps, list_job_maps
@@ -77,7 +78,7 @@ _PAGE = """<!doctype html>
              padding: 16px; font-size: 13px; overflow-y: auto; overflow-x: hidden;
              transform: translateX(100%); transition: transform 0.15s ease; z-index: 20; }}
   .drawer.open {{ transform: translateX(0); }}
-  #detail {{ width: min(540px, 100vw); }}
+  #detail {{ width: min(100vw, max(540px, 68vw)); max-width: 1300px; }}
   .drawer .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px 0; }}
   .drawer .chip {{ background: var(--neutral-bg); border-radius: 12px; padding: 2px 10px; font-size: 12px; }}
   .drawer details.sec {{ border-top: 1px solid var(--border); padding: 8px 0; }}
@@ -340,7 +341,9 @@ function showCompare() {{
       jobs.map(j => "<td>" + esc(varying[k][j]) + "</td>").join("") + "</tr>";
   }}
   const header = "<tr><th>Parameter</th>" + jobs.map(j => "<th>" + esc(j) + "</th>").join("") + "</tr>";
+  const withMap = jobs.filter(j => mainMap(j));
   let body = "<h2>Compare " + jobs.length + " jobs</h2>" +
+    (INTERACTIVE && withMap.length >= 2 ? "<p><button onclick='openBrowserCompare(" + JSON.stringify(withMap.slice(0, 2)) + ")' title='main maps of the first two jobs with a map, side by side in the browser (difference available there)'>\u25b6 compare maps in 3D (browser)</button></p>" : "") +
     "<table class=diff><thead>" + header + "</thead><tbody>" +
     (rows || "<tr><td class=note colspan=" + (jobs.length + 1) + ">(all identical)</td></tr>") +
     "</tbody></table>";
@@ -579,21 +582,63 @@ function renderJobList(filter) {{
 const CLASS_COLORS = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
 const classThumbCache = {{}};
 function chosenBy(job, i) {{ const c = job && JOBS[job].chosen[i + 1]; return c ? c.join(", ") : ""; }}
+// Mini projections (top row) and central sections (bottom row) of every class map, next to its 2D thumbnail. From the 8-bit cube of /volume.
+function drawClassMaps(el, buf) {{
+  const px = +el.dataset.size || 80, names = ["XY", "XZ", "YZ"];
+  if (el.dataset.size) el.style.gridTemplateColumns = "repeat(6,minmax(0," + px + "px))";
+  const dv = new DataView(buf), nx = dv.getUint16(0, true), ny = dv.getUint16(2, true), nz = dv.getUint16(4, true), d = new Uint8Array(buf, 20, nx * ny * nz);
+  const at = (x, y, z) => d[x + nx * (y + ny * z)];
+  const axes = [[nx, ny, nz, (u, v, a) => at(u, v, a)], [nx, nz, ny, (u, v, a) => at(u, a, v)], [ny, nz, nx, (u, v, a) => at(a, u, v)]];
+  el.innerHTML = "";
+  for (const proj of [true, false]) for (const [ai, [w, h, n, get]] of axes.entries()) {{
+    const f = new Float32Array(w * h); let lo = 1e9, hi = -1e9;
+    for (let v = 0; v < h; v++) for (let u = 0; u < w; u++) {{
+      let t = 0; if (proj) {{ for (let a = 0; a < n; a++) t += get(u, v, a); t /= n; }} else t = get(u, v, n >> 1);
+      f[v * w + u] = t; if (t < lo) lo = t; if (t > hi) hi = t;
+    }}
+    const c = document.createElement("canvas"); c.width = w; c.height = h; c.style.cssText = "display:block;width:100%;height:auto;border-radius:3px;background:#000";
+    const g = c.getContext("2d"), im = g.createImageData(w, h), k = 255 / Math.max(hi - lo, 1e-6);
+    for (let i = 0; i < f.length; i++) {{ const v = (f[i] - lo) * k; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = v; im.data[4 * i + 3] = 255; }}
+    g.putImageData(im, 0, 0);
+    const cell = document.createElement("div"); cell.style.position = "relative"; cell.appendChild(c);
+    const tg = document.createElement("span"); tg.textContent = (proj ? "proj " : "sec ") + names[ai];
+    tg.style.cssText = "position:absolute;left:2px;top:1px;font:9px system-ui;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;pointer-events:none";
+    cell.appendChild(tg); el.appendChild(cell);
+  }}
+}}
+function fillClassMaps() {{
+  document.querySelectorAll(".cmaps:not([data-done])").forEach(el => {{
+    el.dataset.done = "1"; el.title = (el.title || "") + " (click: sections with sliders in the 3D view)";
+    el.onclick = () => {{ show3d(view3dUrl([{{job: el.dataset.job, f: el.dataset.f}}], {{vm: "sec"}})); const h = document.getElementById("v3host"); if (h) h.scrollIntoView({{block: "nearest", behavior: "smooth"}}); }};
+    fetch("/volume?t=" + encodeURIComponent(TOKEN) + "&job=" + encodeURIComponent(el.dataset.job) + "&f=" + encodeURIComponent(el.dataset.f) + "&detail=96")
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject()).then(b => drawClassMaps(el, b)).catch(() => {{ el.style.display = "none"; }});
+  }});
+}}
+if (INTERACTIVE) new MutationObserver(fillClassMaps).observe(document.body, {{childList: true, subtree: true}});
+const clsView = {{sort: false, hide: false}};
+function clsOrder(shares) {{
+  let ix = shares.map((_, i) => i);
+  if (clsView.hide) ix = ix.filter(i => shares[i] >= TINY);
+  if (clsView.sort) ix.sort((a, b) => shares[b] - shares[a]);
+  return ix;
+}}
 function classCards(hist, idx, thumbs, flags, job) {{
   const e = hist[idx];
-  return e.shares.map((s, i) => {{
+  return clsOrder(e.shares).map(i => {{
+    const s = e.shares[i];
     const kept = flags ? flags[i] : null;
     const tiny = kept === false || (kept === null && s < TINY);
-    return "<div style='display:flex;align-items:center;gap:8px;margin:4px 0" + (tiny ? ";opacity:.45" : "") +
+    return "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;width:100%;max-width:1500px;margin:4px 0" + (tiny ? ";opacity:.45" : "") +
       (kept ? ";border-left:4px solid #2e7d32;padding-left:6px" : "") + "'>" +
-      (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=80 height=80 style='border-radius:4px;cursor:zoom-in' title='enlarge' onclick='bigClass(" + i + ")'>" : "") +
-      "<div style='flex:1'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%" +
+      (thumbs && thumbs[i] ? "<img src='" + thumbs[i] + "' width=110 height=110 style='flex:none;order:-2;border-radius:4px;cursor:zoom-in' title='enlarge' onclick='bigClass(" + i + ")'>" : "") +
+      "<div style='flex:1 1 100%;order:5'><div style='font-size:12px'>class " + (i + 1) + " &middot; " + (s * 100).toFixed(1) + "%" +
       (chosenBy(job, i) ? " &middot; <b style='color:#2e7d32'>&#10003; kept by " + esc(chosenBy(job, i)) + "</b>" : "") +
       (kept === true ? " &middot; <b style='color:#2e7d32'>&#10003; selected</b>" : kept === false ? " &middot; discarded" :
         tiny ? " &middot; nearly empty" : "") + "</div>" +
       "<div style='background:var(--border);height:8px;border-radius:4px'><div style='height:8px;border-radius:4px;background:" +
       CLASS_COLORS[i % CLASS_COLORS.length] + ";width:" + Math.max(1, Math.round(s * 100)) + "%'></div></div></div>" +
-      (INTERACTIVE && job ? "<button title='open this class map in ChimeraX' onclick='open3d(&quot;" + esc(job) + "&quot;,[&quot;run_it" + String(e.iter).padStart(3, "0") + "_class" + String(i + 1).padStart(3, "0") + ".mrc&quot;],false,this)'>3D</button>" : "") +
+      (INTERACTIVE && job ? "<span class=cmaps data-job='" + esc(job) + "' data-f='run_it" + String(e.iter).padStart(3, "0") + "_class" + String(i + 1).padStart(3, "0") + ".mrc' title='top row: mean projections, bottom row: central sections; XY looks along z, XZ along y, YZ along x' style='order:-1;flex:1 1 0;min-width:0;max-width:1400px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px;cursor:zoom-in'></span>" : "") +
+      (INTERACTIVE && job ? "<button style='flex:none' title='open this class map in ChimeraX' onclick='open3d(&quot;" + esc(job) + "&quot;,[&quot;run_it" + String(e.iter).padStart(3, "0") + "_class" + String(i + 1).padStart(3, "0") + ".mrc&quot;],false,this)'>3D</button>" : "") +
       "</div>";
   }}).join("");
 }}
@@ -610,14 +655,79 @@ function open3d(job, files, tile, btn) {{
     .catch(() => {{ btn.textContent = "! " + label; }})
     .finally(() => {{ setTimeout(() => {{ btn.disabled = false; btn.textContent = label; }}, 2500); }});
 }}
+// Browser 3D viewer helpers. refs = [(job, file)]; the first ref's job is the default job of the URL, others are written "job:file".
+function view3dUrl(refs, opts) {{
+  opts = opts || {{}};
+  const enc = encodeURIComponent, main = refs[0].job, q = r => r.job === main ? r.f : r.job + ":" + r.f;
+  return "/view3d?t=" + enc(TOKEN) + "&job=" + enc(main) + refs.map(r => "&f=" + enc(q(r))).join("") +
+    (opts.mask ? "&mask=" + enc(opts.mask) : "") + (opts.color ? "&color=" + enc(opts.color) : "") + (opts.mode ? "&mode=" + enc(opts.mode) : "") + (opts.vm ? "&vm=" + enc(opts.vm) : "");
+}}
+// the job's main result map: post-processed / final map / first class
+function mainMap(job) {{
+  const m = ((JOBS[job] && JOBS[job].maps) || []).find(x => x.rank <= 2);
+  return m ? {{job: m.job || job, f: m.files[0]}} : null;
+}}
+function openBrowserCompare(jobs) {{
+  const refs = jobs.map(mainMap).filter(Boolean).slice(0, 2);
+  if (refs.length < 2) {{ alert("Both jobs need a map to compare."); return; }}
+  show3d(view3dUrl(refs));
+}}
+// In-page 3D view: embedded in the job panel (#v3host), else a floating dock (compare view). No new tab.
+// "Open in ChimeraX" opens the maps shown.
+let V3OPTS = "", V3JOB = "";      // the job's 3D option buttons, shown above the embedded viewer
+function show3d(url) {{
+  let d = document.getElementById("v3host");
+  const embedded = !!d;
+  if (!d) {{
+    d = document.getElementById("v3dock");
+    if (!d) {{
+      d = document.createElement("div"); d.id = "v3dock";
+      d.style.cssText = "position:fixed;right:12px;bottom:12px;width:min(520px,94vw);height:440px;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.25)";
+      document.body.appendChild(d);
+    }}
+  }}
+  if (!d.firstChild) {{
+    d.style.display = "flex"; d.style.flexDirection = "column";
+    d.innerHTML = "<div style='display:flex;gap:6px;align-items:center;padding:4px 0'><b style='flex:1'>3D view</b>" +
+      (embedded ? "<button title='show all maps of this job again, in 3D' onclick='autoShow3d(V3JOB)'>&#9654; show all (3D)</button>" : "") +
+      "<button id=v3chi title='open the maps shown here in ChimeraX'>Open in ChimeraX</button>" +
+      (embedded ? "" : "<button onclick='document.getElementById(&quot;v3dock&quot;).remove()'>&times;</button>") + "</div>" +
+      (embedded ? V3OPTS : "") +
+      "<iframe id=v3frame style='border:0;width:100%;height:" + (embedded ? "max(560px,calc(100vh - 150px))" : "100%") + ";flex:" + (embedded ? "none" : "1") + ";background:#14171c;border-radius:6px'></iframe>";
+  }}
+  const u = new URL(url, location.href), job = u.searchParams.get("job");
+  const files = u.searchParams.getAll("f").filter(f => f.indexOf(":") < 0);
+  document.getElementById("v3chi").onclick = function() {{ open3d(job, files, files.length > 1, this); }};
+  document.getElementById("v3frame").src = url;
+}}
+// opening a job with a map shows its main map right away; all classes side by side when the job has several
+function autoShow3d(job) {{
+  V3JOB = job;
+  const m = ((JOBS[job] && JOBS[job].maps) || []).find(x => x.rank <= 2);
+  if (m && INTERACTIVE) show3d(view3dUrl(m.files.slice(0, 12).map(f => ({{job: m.job || job, f: f}}))));
+}}
 // "Open in ChimeraX" section of a job's detail drawer: every map the job holds (see relion_maps.py) + angular distributions.
 function maps3dBlock(job, info) {{
   if (!INTERACTIVE) return "";
   const btn = (label, files, tile, owner) => "<button style='margin:2px 4px 2px 0' onclick='open3d(&quot;" + esc(owner || job) + "&quot;," +
     esc(JSON.stringify(files)).replace(/"/g, "&quot;") + "," + tile + ",this)'>" + esc(label) + "</button>";
-  let b = (info.maps || []).map(m => btn(m.label, m.files, m.tile, m.job)).join("");
+  const web = (label, files, owner) => "<button title='open in this browser (no ChimeraX needed)' style='margin:2px 4px 2px 0' onclick='show3d(&quot;" +
+    esc("/view3d?t=" + encodeURIComponent(TOKEN) + "&job=" + encodeURIComponent(owner || job) + files.map(f => "&f=" + encodeURIComponent(f)).join("")) + "&quot;)'>" + esc(label) + "</button>";
+  const all = (info.maps || []).flatMap(m => m.files), maskRef = (info.maps || []).find(m => m.rank === 4);
+  let b = (info.maps || []).map(m => btn(m.label, m.files, m.tile, m.job) + web("\u25b6 browser", m.files, m.job)).join("<br>");
+  if (all.includes("relion_locres.mrc") && all.includes("relion_locres_filtered.mrc"))     // local resolution as colour on the filtered map
+    b += "<br><button title='open in this browser: filtered map coloured by local resolution' style='margin:2px 4px 2px 0' onclick='show3d(&quot;" +
+      esc(view3dUrl([{{job: job, f: "relion_locres_filtered.mrc"}}], {{color: job + ":relion_locres.mrc"}})) + "&quot;)'>\u25b6 browser, coloured by local resolution</button>";
+  if (maskRef && (info.maps || []).some(m => m.rank <= 2)) {{      // main map with the job's mask as a see-through shell
+    const mm = mainMap(job);
+    if (mm) b += "<br><button title='open in this browser: main map with the mask as a see-through shell' style='margin:2px 4px 2px 0' onclick='show3d(&quot;" +
+      esc(view3dUrl([mm], {{mask: (maskRef.job || job) + ":" + maskRef.files[0]}})) + "&quot;)'>\u25b6 browser, with mask</button>";
+  }}
   b += (info.bild || []).slice(0, 8).map(f => btn("angdist " + f.replace(/^run(_it\\d+)?(_half\\d)?_/, "").replace("_angdist.bild", ""), [f], "false")).join("");
-  return b ? "<details class=sec open><summary>Open in ChimeraX</summary><p class=note>one ChimeraX window for all clicks; set how it starts under &#9881; Settings</p>" + b + "</details>" : "";
+  const shots = (info.renders || []).slice(0, 12).map(n => "<a href='/render?t=" + encodeURIComponent(TOKEN) + "&f=" + encodeURIComponent(n) + "' target=_blank><img loading=lazy title='" + esc(n) +
+    "' style='width:96px;height:96px;object-fit:contain;background:#14171c;border-radius:4px;margin:2px' src='/render?t=" + encodeURIComponent(TOKEN) + "&f=" + encodeURIComponent(n) + "'></a>").join("");
+  if (shots) b += "<details class=sec open><summary>Renders</summary><p class=note>from <code>reliontree render</code></p>" + shots + "</details>";
+  return b ? "<details class=sec open><summary>3D view: in this browser or in ChimeraX</summary><p class=note>▶ browser needs no ChimeraX; ChimeraX buttons use one window for all clicks; set how it starts under &#9881; Settings</p>" + b + "</details>" : "";
 }}
 // A small "3D" chip (and "Mask" when the job holds or uses one) on the top-right edge of every card that has a map.
 function addCardChips() {{
@@ -634,11 +744,16 @@ function addCardChips() {{
       const g = document.createElementNS(NS, "g");
       g.setAttribute("class", "chip3d");
       g.style.cursor = "pointer";
-      g.innerHTML = "<title>open " + esc(m.label) + (m.files.length > 1 ? " (" + m.files.length + " maps)" : "") + " in ChimeraX</title>" +
+      g.innerHTML = "<title>open " + esc(m.label) + (m.files.length > 1 ? " (" + m.files.length + " maps)" : "") + " in ChimeraX (Shift-click: in this browser)</title>" +
         "<rect x='" + cx + "' y='" + (y - 7) + "' width='" + widths[i] + "' height='15' rx='7.5' stroke='#fff' stroke-width='1.5' fill='" + (i === 0 ? "#1565c0" : "#6a1b9a") + "'/>" +
         "<text x='" + (cx + widths[i] / 2) + "' y='" + (y + 3.5) + "' fill='#fff' font-size='10' font-weight='bold' text-anchor='middle'>" + labels[i] + "</text>";
       ["click", "mousedown", "mouseup"].forEach(ev => g.addEventListener(ev, e => e.stopPropagation()));
-      g.addEventListener("click", () => {{
+      g.addEventListener("click", ev => {{
+        if (ev.shiftKey) {{      // Shift-click: the browser viewer (no ChimeraX needed); the main chip adds the job's mask when it has one
+          const mk = i === 0 && specs[1] ? (specs[1].job || job) + ":" + specs[1].files[0] : null;
+          show3d(view3dUrl(m.files.map(f => ({{job: m.job || job, f: f}})), {{mask: mk}}));
+          return;
+        }}
         const t = g.querySelector("text");
         t.textContent = "\u2026";
         open3dRequest(m.job || job, m.files, m.tile).then(j => {{ g.querySelector("title").textContent = j.ok || j.error; t.textContent = j.ok ? "\u2713" : "!"; }})
@@ -688,7 +803,7 @@ function setClassIter(idx) {{
   const key = c.job + "@" + e.iter;
   if (classThumbCache[key]) {{ paint(classThumbCache[key]); return; }}
   paint(null);
-  fetch("/class-thumbs?job=" + encodeURIComponent(c.job) + "&it=" + e.iter + "&size=80")
+  fetch("/class-thumbs?job=" + encodeURIComponent(c.job) + "&it=" + e.iter + "&size=128")
     .then(r => r.json()).then(j => {{ classThumbCache[key] = j.thumbs || []; paint(classThumbCache[key]); }}).catch(() => {{}});
 }}
 
@@ -718,7 +833,7 @@ function selectionBlock(info) {{
 }}
 function paintSelection(info) {{
   const sel = info.selection, hist = JOBS[sel.parent].classes, e = hist[hist.length - 1];
-  fetch("/class-thumbs?job=" + encodeURIComponent(sel.parent) + "&it=" + e.iter + "&size=80").then(r => r.json()).then(j => {{
+  fetch("/class-thumbs?job=" + encodeURIComponent(sel.parent) + "&it=" + e.iter + "&size=128").then(r => r.json()).then(j => {{
     const el = document.getElementById("selCards");
     if (el) el.innerHTML = classCards(hist, hist.length - 1, j.thumbs || [], sel.flags);
   }}).catch(() => {{}});
@@ -733,7 +848,9 @@ function classesBlock(job, hist, thumbs) {{
   const slider = hist.length > 1 ?
     "<div style='display:flex;align-items:center;gap:8px;margin:4px 0 8px'><input type=range min=0 max=" + (hist.length - 1) +
     " value=" + (hist.length - 1) + " style='flex:1' oninput='setClassIter(+this.value)'><span id=classIterLabel class=note>iteration " + last.iter + "</span></div>" : "<span id=classIterLabel hidden></span>";
-  const cards = "<div id=classCards>" + classCards(hist, hist.length - 1, thumbs, null, job) + "</div>";
+  const bar = "<div style='margin:2px 0 4px;font-size:12px'><label><input type=checkbox onchange='clsView.sort=this.checked;setClassIter(classCtx.idx)'" + (clsView.sort ? " checked" : "") + "> sort by share</label> &nbsp; " +
+    "<label><input type=checkbox onchange='clsView.hide=this.checked;setClassIter(classCtx.idx)'" + (clsView.hide ? " checked" : "") + "> hide nearly empty</label></div>";
+  const cards = "<div id=classCards style='display:flex;flex-wrap:wrap;gap:6px 14px'>" + classCards(hist, hist.length - 1, thumbs, null, job) + "</div>";
   // it0 is the untrained start (switch rate is meaningless there) -- skip it.
   const ch = hist.filter(h => h.changes_classes !== null && h.iter > 0);
   const W = 480, H = 150, L = 40, B = 18, T = 8, R = 8, axis = "var(--text-muted)";
@@ -770,7 +887,7 @@ function classesBlock(job, hist, thumbs) {{
       last.shares.map((_, i) => [CLASS_COLORS[i % CLASS_COLORS.length], its.map(h => h.shares[i] || 0)]),
       Math.max(0.1, ...its.flatMap(h => h.shares)) * 1.1, v => (v * 100).toFixed(0) + "%", null);
   }}
-  return "<details class=sec open><summary>Classes</summary>" + slider + cards + conv + "</details>";
+  return "<details class=sec open><summary>Classes</summary>" + slider + bar + cards + conv + "</details>";
 }}
 
 function selectJob(job) {{
@@ -795,15 +912,17 @@ function selectJob(job) {{
   const optKeys = Object.keys(info.options).sort();
   const optRows = optKeys.map(k => "<tr><td class=key>" + esc(k) + "</td><td>" + esc(info.options[k]) + "</td></tr>").join("");
   const q = job.replace(/'/g, "\\\\'");
+  V3OPTS = maps3dBlock(job, info).replace("<details class=sec open>", "<details class=sec>");
   detail.innerHTML = "<button class='close-btn' onclick='closeDrawers()'>&times;</button>" +
     "<h2>" + esc(info.alias || job) + "</h2>" + (info.alias ? "<p class=note style='margin:-8px 0 8px'>" + esc(job) + "</p>" : "") +
     (document.getElementById("card-" + job) ? "<div class=pathbtns><button class=pa-btn onclick=\\"setPath('A','" + q + "')\\">&#9679; Path A</button>" +
       "<button class=pb-btn onclick=\\"setPath('B','" + q + "')\\">&#9679; Path B (compare)</button></div>" : "") +
     "<div class=chips>" + chips.join("") + "</div>" +
     classesBlock(job, info.classes, info.class_thumbs) + selectionBlock(info) +
+    (INTERACTIVE && !(info.classes && info.classes.length) && mainMap(job) ? "<p class=note style='margin:10px 0 2px'>Main map: mean projections (top) and central sections (bottom)</p><span class=cmaps data-size=260 data-job='" + esc(mainMap(job).job) + "' data-f='" + esc(mainMap(job).f) + "' style='display:grid;gap:3px'></span>" : "") +
+    (INTERACTIVE && (info.maps || []).some(x => x.rank <= 2) ? "<div id=v3host style='margin:8px 0'></div>" : "") +
     orientationSection(job, info) +
     fscSection(info) +
-    maps3dBlock(job, info) +
     (info.annotations.length ? "<details class=sec open><summary>Notes from tools</summary>" + info.annotations.map(a =>
       "<p style='margin:6px 0'><span class='lvl-dot lvl-" + a.level + "'></span><b>" + esc(a.label) + "</b> <span class=note>" + esc(a.source) + "</span>" +
       (a.detail ? "<br><span style='font-size:12px'>" + esc(a.detail) + "</span>" : "") + "</p>").join("") + "</details>" : "") +
@@ -815,6 +934,7 @@ function selectJob(job) {{
   if (INTERACTIVE && info.classes && info.classes.length) setClassIter(info.classes.length - 1);
   if (INTERACTIVE && info.selection) paintSelection(info);
   openDrawer("detail");
+  autoShow3d(job);
   if (info.orient) loadGlobe(job, null);
   centerOn(job);
 }}
@@ -974,6 +1094,16 @@ def _js(obj):
     return json.dumps(obj).replace("</", "<\\/")
 
 
+def _renders_of(job_dir, job):
+    """Names of the PNGs `reliontree render` left for this job in <project>/.reliontree/renders (newest first)."""
+    d = Path(job_dir).parent.parent / ".reliontree" / "renders"
+    try:
+        found = [f for f in d.iterdir() if f.name.startswith(job.replace("/", "_") + "_") and f.suffix == ".png"]
+    except OSError:
+        return []
+    return [f.name for f in sorted(found, key=lambda f: -f.stat().st_mtime)]
+
+
 def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html=None,
                  selected_job=None, interactive=False, token=""):
     """A single self-contained HTML string embedding the SVG tree plus a
@@ -1032,6 +1162,7 @@ def render_html(tree, title="RELION job tree", refresh_seconds=None, browse_html
             "annotations": tree.get("annotations", {}).get(job, []),
             "orient": has_orientation(tree["job_dirs"][job]),
             "fsc": fsc_curves(tree["job_dirs"][job]) if job_type(job) in ("PostProcess", "Refine3D") else None,
+            "renders": _renders_of(tree["job_dirs"][job], job) if interactive else [],
             "maps": _maps_of[job], "cardmaps": card_maps(_maps_of[job]), "bild": [p.name for _, p in sorted(_class_files(tree["job_dirs"][job]).items())],
             "resolution_angstrom": stats.get("resolution_angstrom"),
             "fsc_resolution": tree.get("best_fsc") if job == tree["best"] else None,
