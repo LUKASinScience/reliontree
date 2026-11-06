@@ -1,6 +1,6 @@
 [project]
 name = "reliontree"
-version = "0.4.0"
+version = "0.5.0"
 description = "Standalone RELION job-lineage viewer — no ChimeraX, no third-party server framework, no GUI toolkit required"
 readme = "README.md"
 license = "AGPL-3.0-or-later"

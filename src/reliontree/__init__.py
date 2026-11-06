@@ -25,7 +25,7 @@ from .relion_methods import draft_methods_paragraph
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
 from .render_html import render_html
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def start_background(project, port=8710, interval=10):
