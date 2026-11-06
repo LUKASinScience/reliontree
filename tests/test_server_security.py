@@ -26,7 +26,7 @@ def server(tmp_path_factory):
     errlog = root / "server.err"
     proc = subprocess.Popen([sys.executable, "-c", "import sys; from reliontree.cli import main; main(sys.argv[1:])",
                              "watch", str(proj), "--port", str(port), "--no-open"],
-                            env=env, stdout=subprocess.DEVNULL, stderr=open(errlog, "w"))
+                            env=env, stdout=open(root / "server.out", "w"), stderr=open(errlog, "w"))
     deadline = time.time() + 90            # a loaded CI runner needs far longer than a laptop to start Python
     while True:
         try:
@@ -39,16 +39,25 @@ def server(tmp_path_factory):
                 pytest.fail("server did not start (%s): %s" % (state, errlog.read_text()[-1500:]))
             time.sleep(0.2)
     conn = http.client.HTTPConnection("127.0.0.1", port)
-    conn.request("GET", "/")
+    for _ in range(100):                    # the address `watch` prints holds the login code
+        m = re.search(r"/\?k=\S+", (root / "server.out").read_text())
+        if m:
+            break
+        time.sleep(0.1)
+    conn.request("GET", m.group(0))
+    r = conn.getresponse()
+    r.read()
+    cookie = r.getheader("Set-Cookie").split(";")[0]
+    conn.request("GET", "/", headers={"Cookie": cookie})
     page = conn.getresponse().read().decode()
     token = re.search(r'const TOKEN = "([^"]+)"', page).group(1)
-    yield {"port": port, "token": token, "home": root, "page": page}
+    yield {"port": port, "token": token, "cookie": cookie, "home": root, "page": page}
     proc.kill()
 
 
 def call(server, method, path, headers=None, body=None):
     conn = http.client.HTTPConnection("127.0.0.1", server["port"])
-    h = {"Host": "127.0.0.1:%d" % server["port"]}
+    h = {"Host": "127.0.0.1:%d" % server["port"], "Cookie": server["cookie"]}
     h.update(headers or {})
     conn.request(method, path, body=body, headers=h)
     r = conn.getresponse()
@@ -114,3 +123,12 @@ def test_open_and_browse_need_the_token(server):
     assert call(server, "GET", "/?open=%s&t=%s" % (proj, t))[0] == 302
     status, page = call(server, "GET", "/?browse=%s&t=%s" % (server["home"], t))
     assert status == 200 and "&amp;t=" + t in page            # page links carry the token
+
+
+def test_nothing_is_served_without_the_login_cookie(server):
+    """The page embeds the token, so another local user hitting the port must not get it."""
+    for path in ("/", "/class-thumbs?job=Class3D/job001&it=1", "/view3d?job=Class3D/job001&f=a.mrc", "/volume", "/render?f=a.png"):
+        status, body = call(server, "GET", path, {"Cookie": ""})
+        assert status == 403 and "token" not in str(body).lower() and "TOKEN" not in str(body), path
+    assert call(server, "GET", "/?k=wrong", {"Cookie": ""})[0] == 403
+    assert call(server, "POST", "/settings", {"Cookie": "", "Content-Type": "application/json"}, "{}")[0] == 403

@@ -19,7 +19,12 @@ def test_start_serve_stop(tmp_path):
     srv = reliontree.start_background(tmp_path, port)
     try:
         assert srv.alive() and srv.url == "http://127.0.0.1:%d/" % port
-        assert urllib.request.urlopen(srv.url, timeout=5).status == 200
+        with pytest.raises(urllib.error.HTTPError) as e:                   # no login code, no cookie: nothing is served
+            urllib.request.urlopen(srv.url, timeout=5)
+        assert e.value.code == 403
+        browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
+        assert browser.open(srv.server.login_url(), timeout=5).status == 200     # code -> cookie -> redirect -> served
+        assert browser.open(srv.url, timeout=5).status == 200                    # the cookie alone is enough afterwards
         with pytest.raises(OSError):                       # the port is taken while it runs
             reliontree.start_background(tmp_path, port)
     finally:

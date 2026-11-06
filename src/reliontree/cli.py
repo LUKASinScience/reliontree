@@ -30,9 +30,10 @@ import secrets
 import gzip
 import sys
 import webbrowser
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 from . import chimerax_bridge
 from .relion_treebuild import build_tree, ordered_jobs, render_svg
@@ -625,6 +626,11 @@ def make_server(args):
     # requests that carry this per-run token (embedded in our own page, unreadable for other sites: no CORS headers)
     # AND arrive with our own Host/Origin (blocks DNS rebinding and cross-site forms).
     page_token = secrets.token_urlsafe(16)
+    # Nothing is served without the session cookie, and the cookie is only handed out for a login code (`?k=`). Codes live
+    # in this process; the URL that `watch` prints holds a reusable one (the terminal is private), `reliontree render` mints
+    # a one-time one per Chrome run (its command line is visible to other users via `ps`, a spent code is worthless).
+    codes = {}
+    cookie_name = "reliontree_%d" % args.port
     own_hosts = ("127.0.0.1:%d" % args.port, "localhost:%d" % args.port)
 
     class Handler(BaseHTTPRequestHandler):
@@ -636,12 +642,34 @@ def make_server(args):
         def _authorized(self, token):
             return self._own_origin() and secrets.compare_digest(str(token or ""), page_token)
 
+        def _logged_in(self):
+            jar = SimpleCookie(self.headers.get("Cookie", ""))
+            return cookie_name in jar and secrets.compare_digest(jar[cookie_name].value, page_token)
+
+        def _login(self):
+            """True when the request may proceed. A valid `?k=` code is traded for the cookie and the URL is redirected without it."""
+            parts = urlsplit(self.path)
+            pairs = parse_qsl(parts.query, keep_blank_values=True)
+            key = next((v for k, v in pairs if k == "k"), None)
+            if key is not None and key in codes:
+                if codes[key]:
+                    codes.pop(key, None)
+                self.send_response(302)
+                self.send_header("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict" % (cookie_name, page_token))
+                self.send_header("Location", parts.path + ("?" + urlencode([(k, v) for k, v in pairs if k != "k"]) if len(pairs) > 1 else ""))
+                self.end_headers()
+                return False
+            if self._logged_in():
+                return True
+            self._text("forbidden: open the address that 'reliontree watch' printed (it carries the login code)", 403)
+            return False
+
         def _deny(self):
             self._json({"error": "forbidden (open this page from the reliontree server itself)"}, status=403)
 
         def do_POST(self):
             try:
-                if not self._own_origin():
+                if not self._own_origin() or not self._logged_in():
                     self._deny()
                     return
                 if urlsplit(self.path).path != "/settings":
@@ -668,6 +696,8 @@ def make_server(args):
             try:
                 if not self._own_origin():      # every route: blocks DNS rebinding and cross-site requests
                     self._deny()
+                    return
+                if not self._login():
                     return
                 query = parse_qs(urlsplit(self.path).query)
                 error = None
@@ -803,6 +833,12 @@ def make_server(args):
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.page_token, server.view_state = page_token, ""
+
+    def login_url(once=False):
+        code = secrets.token_urlsafe(16)
+        codes[code] = once
+        return "http://127.0.0.1:%d/?k=%s" % (args.port, code)
+    server.login_url = login_url
     return server, "http://127.0.0.1:%d/" % args.port
 
 
@@ -851,7 +887,7 @@ def cmd_render(args):
                 ok = False
                 for soft in ([False, True] if mode == "auto" else [mode == "soft"]):
                     bg.server.view_state = ""
-                    url = rr.view_url(bg.url, token, job, files, rx, ry, args.level, "soft" if soft else ("gpu" if mode == "gpu" else "auto"))
+                    url = rr.view_url(bg.url, token, bg.server.login_url(once=True).split("k=")[1], job, files, rx, ry, args.level, "soft" if soft else ("gpu" if mode == "gpu" else "auto"))
                     ok = rr.shoot(chrome, url, out, args.size * cols, args.size * rows, soft)
                     ok = ok and bg.server.view_state.startswith("ready")
                     if ok:
@@ -872,7 +908,8 @@ def cmd_render(args):
 
 def cmd_watch(args):
     server, url = make_server(args)
-    print("reliontree watch: %s (refreshing every %ds, Ctrl-C to stop)" % (url, args.interval))
+    url = server.login_url()
+    print("reliontree watch: %s (refreshing every %ds, Ctrl-C to stop)" % (url, args.interval), flush=True)
     if not args.no_open:
         webbrowser.open(url)
     try:

@@ -68,8 +68,8 @@ def tile_shape(n):
     return cols, math.ceil(n / cols)
 
 
-def view_url(base, token, job, files, rx, ry, level, mode, size_tiles=None):
-    q = "t=%s&job=%s&chrome=1&rx=%s&ry=%s&render=%s" % (quote(token), quote(job), rx, ry, mode)
+def view_url(base, token, key, job, files, rx, ry, level, mode, size_tiles=None):
+    q = "k=%s&t=%s&job=%s&chrome=1&rx=%s&ry=%s&render=%s" % (quote(key), quote(token), quote(job), rx, ry, mode)
     if level not in (None, "auto"):
         q += "&level=%s" % level
     return base + "view3d?" + q + "".join("&f=" + quote(f) for f in files)

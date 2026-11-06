@@ -102,6 +102,11 @@ auto-opening the browser), plus the same `--job`/`--max-hops` as `tree`. A
 local server (Python's stdlib `http.server`, no Flask/Streamlit) rebuilds
 the tree on every request; usable on HPC/cloud too via an SSH tunnel.
 
+**Login code.** `watch` prints its address with a login code (`http://127.0.0.1:8710/?k=...`) and opens exactly that address.
+The code is traded for a session cookie, so nothing is served to anyone who does not have it (other users on a shared login
+node get a 403). Open the printed address, not the bare one; on a cluster, forward the port with SSH and paste the printed
+address into your laptop's browser. A restart prints a new code.
+
 ## Exit codes
 
 For use in scripts or CI:

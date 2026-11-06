@@ -75,8 +75,12 @@ def test_render_png_route_validates(proj):
     assert _renders_of(proj / "Refine3D" / "job002", "Refine3D/job002") == []
 
 
-def _get(url, host=None):
-    req = urllib.request.Request(url, headers={"Host": host} if host else {})
+def _get(url, host=None, token=None):
+    """GET as a logged-in browser: `token` is the session cookie value of the server on this port (None = no cookie)."""
+    h = {"Host": host} if host else {}
+    if token:
+        h["Cookie"] = "reliontree_%s=%s" % (url.split(":")[2].split("/")[0], token)
+    req = urllib.request.Request(url, headers=h)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, r.read()
@@ -95,15 +99,22 @@ def test_routes_token_and_host(proj):
         (proj / ".reliontree" / "renders").mkdir(parents=True)
         (proj / ".reliontree" / "renders" / "a.png").write_bytes(b"\x89PNG")
         ok = base + "view3d?t=%s&job=Refine3D/job001&f=run_class001.mrc&mask=MaskCreate/job003:mask.mrc" % t
-        assert _get(ok)[0] == 200 and b"MaskCreate/job003:mask.mrc" in _get(ok)[1]
-        assert _get(ok.replace(t, "wrong"))[0] == 403
-        assert _get(ok, host="evil.example:%d" % port)[0] == 403
-        assert _get(base + "render?t=%s&f=a.png" % t) == (200, b"\x89PNG")
-        assert _get(base + "render?f=a.png")[0] == 403
-        assert _get(base + "render?t=%s&f=../default_pipeline.star" % t)[0] == 400
-        assert _get(base + "view3d-state?t=%s&s=ready%%20gpu%%3Cb%%3E" % t)[0] == 200
+        g = lambda url, **kw: _get(url, token=t, **kw)
+        assert g(ok)[0] == 200 and b"MaskCreate/job003:mask.mrc" in g(ok)[1]
+        assert _get(ok)[0] == 403                                         # no session cookie: not even the page (it holds the token)
+        assert _get(ok, token="wrong")[0] == 403
+        assert g(ok.replace(t, "wrong"))[0] == 403
+        assert g(ok, host="evil.example:%d" % port)[0] == 403
+        assert g(base + "render?t=%s&f=a.png" % t) == (200, b"\x89PNG")
+        assert g(base + "render?f=a.png")[0] == 403                       # cookie but no page token
+        assert g(base + "render?t=%s&f=../default_pipeline.star" % t)[0] == 400
+        assert g(base + "view3d-state?t=%s&s=ready%%20gpu%%3Cb%%3E" % t)[0] == 200
         assert bg.server.view_state == "ready gpub"
-        assert _get(base + "view3d?t=%s&job=Refine3D/job001&f=run_class001.mrc&mask=Refine3D/job077:m.mrc" % t)[0] == 400
+        assert g(base + "view3d?t=%s&job=Refine3D/job001&f=run_class001.mrc&mask=Refine3D/job077:m.mrc" % t)[0] == 400
+        once = bg.server.login_url(once=True)                             # a one-time code works exactly once
+        assert urllib.request.build_opener(urllib.request.HTTPCookieProcessor()).open(once, timeout=10).status == 200
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.build_opener(urllib.request.HTTPCookieProcessor()).open(once, timeout=10)
     finally:
         bg.stop()
 
@@ -137,8 +148,10 @@ url = a[-1]
 soft = "--use-angle=swiftshader" in a
 open(out, "wb").write(b"\\x89PNG fake " + (b"soft" if soft else b"gpu"))
 tok = re.search(r"t=([^&]+)", url).group(1)
+page = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())      # like Chrome: the login code in the URL becomes a cookie
+page.open(url)
 state = "failed" if (soft is False and "FAILGPU" in " ".join(a + [__import__("os").environ.get("FAKE_MODE", "")])) else "ready " + ("soft" if soft else "gpu")
-urllib.request.urlopen(url.split("view3d")[0] + "view3d-state?t=" + tok + "&s=" + state.replace(" ", "%20"))
+page.open(url.split("view3d")[0] + "view3d-state?t=" + tok + "&s=" + state.replace(" ", "%20"))
 """
 
 

@@ -4,6 +4,7 @@ asserting each produces the expected content. No mocks — real filesystem,
 real parser."""
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -216,9 +217,11 @@ def test_zero_config_no_project_starts_picker(tmp_path):
     try:
         body = None
         deadline = time.time() + 90        # a loaded CI runner needs far longer than a laptop to start Python
+        login = re.search(r"http://\S+", proc.stdout.readline()).group(0)   # the printed address carries the login code
+        browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
         while time.time() < deadline and proc.poll() is None:
             try:
-                body = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=2).read().decode()
+                body = browser.open(login, timeout=2).read().decode()
                 break
             except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
                 time.sleep(0.2)

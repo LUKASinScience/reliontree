@@ -179,7 +179,7 @@ output and exit codes.
 source .venv/bin/activate
 pip install -e .                        # installs the `reliontree` command into this venv
 cd /path/to/your/relion_project          # must contain default_pipeline.star
-reliontree                               # zero-config: opens the live view at http://127.0.0.1:8710
+reliontree                               # zero-config: opens the live view (prints http://127.0.0.1:8710/?k=<login code>)
 reliontree tree . --format text          # ASCII tree
 reliontree tree . --format json | head -30
 reliontree table . --format csv | head -5
@@ -292,6 +292,11 @@ never needed ChimeraX to begin with. Homepage:
   concept, screenshots and demo GIF for the README/docs
 - Claude Code (Anthropic) — AI pair-programming assistant, wrote and
   reviewed a substantial part of this codebase alongside Lukas
+
+**Login code.** `watch` prints its address with a login code (`http://127.0.0.1:8710/?k=...`) and opens exactly that address.
+The code is traded for a session cookie, so nothing is served to anyone who does not have it (other users on a shared login
+node get a 403). Open the printed address, not the bare one; on a cluster, forward the port with SSH and paste the printed
+address into your laptop's browser. A restart prints a new code.
 
 ## License
 

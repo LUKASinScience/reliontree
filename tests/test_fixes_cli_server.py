@@ -102,7 +102,7 @@ def test_max_hops_zero_or_negative_is_an_error(proj, capsys):
 def get(srv, path):
     port = int(srv.url.rsplit(":", 1)[1].strip("/"))
     c = http.client.HTTPConnection("127.0.0.1", port)
-    c.request("GET", path)
+    c.request("GET", path, headers={"Cookie": "reliontree_%d=%s" % (port, srv.server.page_token)})
     r = c.getresponse()
     return r.status, r.read().decode()
 
