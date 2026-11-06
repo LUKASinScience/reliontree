@@ -46,7 +46,7 @@ from .relion_export import history_rows, rows_to_csv, rows_to_markdown
 from .relion_methods import draft_methods_paragraph
 from .relion_orientation import job_orientation
 from . import relion_plan
-from .relion_pipeline import load_pipeline, resolve_job
+from .relion_pipeline import load_pipeline, resolve_job, unlisted_jobs
 from .relion_project import ProjectNotFoundError, find_project
 from .render_html import render_html
 
@@ -348,6 +348,15 @@ def cmd_overlap(args):
     for a in ca:
         lines.append("%5d " % a + "".join("%8d" % counts.get((a, b), 0) for b in cb))
     _write("\n".join(lines), args.out)
+
+
+def cmd_orphans(args):
+    """Job folders on disk that are not in default_pipeline.star. Exit 0 either way: it is a finding, not an error."""
+    names = unlisted_jobs(_project(args))
+    if args.format == "json":
+        print(json.dumps(names))
+    else:
+        print("\n".join(names) if names else "no unlisted job folders")
 
 
 def cmd_why(args):
@@ -910,6 +919,9 @@ def cmd_watch(args):
     server, url = make_server(args)
     url = server.login_url()
     print("reliontree watch: %s (refreshing every %ds, Ctrl-C to stop)" % (url, args.interval), flush=True)
+    if os.environ.get("SSH_CONNECTION"):    # on a login node: the command for the laptop that forwards the port
+        host = os.environ.get("HOSTNAME") or "<this-host>"
+        print("on your own computer:  ssh -L %d:127.0.0.1:%d %s   then open the address above in its browser" % (args.port, args.port, host), flush=True)
     if not args.no_open:
         webbrowser.open(url)
     try:
@@ -1062,6 +1074,11 @@ def _build_parser():
     sp.add_argument("--format", choices=["text", "json"], default="text")
     sp.add_argument("-o", "--out", help="output file (default: stdout)")
     sp.set_defaults(func=cmd_why)
+
+    sp = sub.add_parser("orphans", help="job folders that default_pipeline.star does not list (jobs run by hand)")
+    sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")
+    sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.set_defaults(func=cmd_orphans)
 
     sp = sub.add_parser("watch", help="live-refreshing local view (stdlib http.server, no Flask/Streamlit)")
     sp.add_argument("project", nargs="?", help="RELION project directory (default: auto-detect from cwd)")

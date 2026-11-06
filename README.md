@@ -60,6 +60,7 @@ reliontree why --job Refine3D/job042          # parent, siblings, what changed f
 reliontree compare --job Refine3D/job039 --job Refine3D/job042   # options + resolution/particles/maps + class overlap
 reliontree maps --job Refine3D/job042         # which maps a job holds
 reliontree open --job Refine3D/job042 --map mask   # open in the one ChimeraX window
+reliontree orphans                          # job folders that default_pipeline.star does not list (jobs run by hand)
 reliontree render --job Class3D/job012        # PNGs of the maps through headless Chrome (needs Chrome)
 reliontree settings --run-first "module load chimerax" --check
 reliontree analyze                            # optional: relion-origin checks -> pills on the job cards

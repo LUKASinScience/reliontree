@@ -46,6 +46,25 @@ def parse_pipeline_star(text):
     return out
 
 
+def unlisted_jobs(project):
+    """Job folders (`Type/jobNNN`) on disk that default_pipeline.star does not list: jobs run by hand or from another
+    pipeline, which every tool that starts from the pipeline file misses. Sorted; symlinks and empty folders are ignored."""
+    project = Path(project)
+    try:
+        t = parse_pipeline_star((project / "default_pipeline.star").read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return []
+    listed = {p.get("_rlnPipeLineProcessName", "").strip().rstrip("/") for p in t["processes"]}
+    found = []
+    for kind in sorted(project.iterdir()) if project.is_dir() else []:
+        if kind.is_dir() and not kind.is_symlink() and _SAFE_JOB.fullmatch(kind.name + "/job0"):
+            for job in sorted(kind.iterdir()):
+                name = "%s/%s" % (kind.name, job.name)
+                if job.is_dir() and not job.is_symlink() and _SAFE_JOB.fullmatch(name) and name not in listed and any(job.iterdir()):
+                    found.append(name)
+    return found
+
+
 def load_pipeline(project):
     """Read default_pipeline.star and per-job star files under `project`
     (a pathlib.Path). Returns (procs, node_to_prod, proc_to_in)."""

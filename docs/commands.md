@@ -89,6 +89,15 @@ Both `diff` and `why` are also available live in the browser: check 2+
 jobs in the sidebar for "Compare", or open a job's Details drawer for
 "Why this job?" — computed client-side from data already on the page.
 
+### `orphans` — jobs the pipeline file does not list
+
+```bash
+reliontree orphans
+```
+
+Prints the job folders (`Type/jobNNN`) on disk that `default_pipeline.star` does not list, for example jobs run by hand. They are
+not part of the tree; `--format json` gives a list.
+
 ### `watch` — live-refreshing local view, with options
 
 ```bash

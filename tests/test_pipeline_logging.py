@@ -25,3 +25,17 @@ def test_missing_job_star_stays_quiet(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         load_pipeline(tmp_path)      # no files at all: normal for a fresh directory
     assert not caplog.records
+
+
+def test_unlisted_jobs_finds_hand_run_folders(tmp_path):
+    from reliontree.relion_pipeline import unlisted_jobs
+    (tmp_path / "default_pipeline.star").write_text(
+        "data_pipeline_general\n\n_rlnPipeLineJobCounter 2\n\ndata_pipeline_processes\n\nloop_\n_rlnPipeLineProcessName #1\n"
+        "_rlnPipeLineProcessAlias #2\n_rlnPipeLineProcessTypeLabel #3\n_rlnPipeLineProcessStatusLabel #4\nImport/job001/ None relion.import Succeeded\n")
+    for name in ("Import/job001", "Class3D/job002", "Refine3D/job003", "Select/job004", "not a job/x"):
+        (tmp_path / name).mkdir(parents=True)
+        (tmp_path / name / "note.txt").write_text("x")
+    (tmp_path / "Select" / "job004" / "note.txt").unlink()          # empty folder: ignored
+    (tmp_path / "Class3D" / "link").symlink_to(tmp_path / "Class3D" / "job002")
+    assert unlisted_jobs(tmp_path) == ["Class3D/job002", "Refine3D/job003"]
+    assert unlisted_jobs(tmp_path / "nope") == []
