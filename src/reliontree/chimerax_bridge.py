@@ -33,6 +33,10 @@ TEMPLATE_NAME = re.compile(r"[A-Za-z0-9 _.\-]{0,60}")      # a FigureStyle templ
 
 LISTENER_SCRIPT = Path(__file__).with_name("chimerax_listener.py")   # run inside ChimeraX by `runscript`
 
+# The launch line is a bash script (with 'Run first', e.g. module load); no Windows port yet. A ChimeraX whose
+# listener the user started by hand (runscript, see `reliontree listener-path`) still gets the clicks there.
+NO_LAUNCH = "Starting ChimeraX from reliontree needs bash and does not work on Windows yet. Use the browser 3D view, or run the listener in an open ChimeraX: runscript <path from 'reliontree listener-path'>" if os.name == "nt" else ""
+
 _launched = None        # (Popen, start time) of the last ChimeraX this process started
 
 
@@ -113,6 +117,8 @@ def _starting():
 
 def _shell_line(settings, tail):
     """One bash line: optional prelaunch, then ChimeraX with `tail` (already quoted)."""
+    if NO_LAUNCH:
+        raise ValueError(NO_LAUNCH)
     cmd = settings["chimerax_cmd"] or _auto_chimerax()
     if not cmd:
         raise ValueError("ChimeraX not found: set the command (and, on a cluster, 'Run first', e.g. module load chimerax) "

@@ -1,3 +1,5 @@
 node_modules/
 src-tauri/target/
 src-tauri/gen/
+# reliontree-cli-<target-triple>, built by scripts/build_sidecar.sh
+src-tauri/binaries/

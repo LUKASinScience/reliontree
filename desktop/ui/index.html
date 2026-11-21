@@ -20,12 +20,30 @@
   #status { margin-top: 12px; white-space: pre-wrap; font-size: 13px; }
   #status.err { color: var(--err); }
   code { font-size: 12px; }
+  .mode { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+  .mode label { flex: 1; margin: 0; padding: 7px; text-align: center; cursor: pointer; font-weight: 600; }
+  .mode input { position: absolute; opacity: 0; width: auto; }
+  .mode label:has(input:checked) { background: var(--accent); color: #fff; }
+  .mode label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+  button.plain { margin-top: 4px; color: inherit; background: transparent; border: 1px solid var(--line); font-weight: 400; }
+  #folder { margin-top: 6px; word-break: break-all; color: var(--muted); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <h1>reliontree</h1>
-<p class="sub">Opens the live view of a RELION project on the cluster through ssh.</p>
+<p class="sub">Opens the live view of a RELION project, on this computer or on the cluster through ssh.</p>
 <form id="f">
+  <div class="mode" role="radiogroup" aria-label="Where the project is">
+    <label><input type="radio" name="mode" value="local" checked> Local folder</label>
+    <label><input type="radio" name="mode" value="ssh"> Cluster (ssh)</label>
+  </div>
+  <div id="local">
+    <label>Project folder on this computer <small>(contains default_pipeline.star)</small></label>
+    <button id="pick" class="plain" type="button">Choose folder&hellip;</button>
+    <div id="folder">No folder chosen.</div>
+  </div>
+  <div id="ssh" hidden>
   <div class="row">
     <div><label for="host">Host</label><input id="host" required placeholder="login.cluster or a name from ~/.ssh/config" autocomplete="off" spellcheck="false"></div>
     <div class="port"><label for="port">Port <small>opt.</small></label><input id="port" type="number" min="1" max="65535" placeholder="22"></div>
@@ -34,9 +52,10 @@
   <input id="user" autocomplete="off" spellcheck="false">
   <label for="project">Project folder on the cluster <small>(contains default_pipeline.star)</small></label>
   <input id="project" placeholder="/path/to/relion/project" autocomplete="off" spellcheck="false">
-  <button id="go" type="submit">Connect</button>
+  </div>
+  <button id="go" type="submit">Open</button>
 </form>
-<div class="note">
+<div class="note" id="sshnote" hidden>
   Uses your ssh key or ssh agent. This window never asks for a password or 2FA code.
   If your cluster needs those, log in once in a terminal first, or set up a key
   (and, if allowed, <code>ControlMaster</code> in <code>~/.ssh/config</code>).
@@ -49,9 +68,41 @@
   const status = (msg, err) => { $("status").textContent = msg; $("status").className = err ? "err" : ""; };
   const fields = ["host", "port", "user", "project"];
   try { const s = JSON.parse(localStorage.getItem("last") || "{}"); fields.forEach((k) => { if (s[k]) $(k).value = s[k]; }); } catch {}
-  invoke("check_ssh").then((v) => status("ssh found: " + v)).catch((e) => status(String(e), true));
+  let folder = "";
+  try { folder = localStorage.getItem("folder") || ""; } catch {}
+  const showFolder = () => { $("folder").textContent = folder || "No folder chosen."; };
+  const mode = () => document.querySelector("input[name=mode]:checked").value;
+  const setMode = (m) => {
+    document.querySelector(`input[name=mode][value=${m}]`).checked = true;
+    $("local").hidden = m !== "local"; $("ssh").hidden = $("sshnote").hidden = m !== "ssh";
+    $("host").required = m === "ssh";
+    try { localStorage.setItem("mode", m); } catch {}
+    if (m === "ssh") invoke("check_ssh").then((v) => status("ssh found: " + v)).catch((e) => status(String(e), true));
+    else status("");
+  };
+  document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", () => setMode(r.value)));
+  try { setMode(localStorage.getItem("mode") === "ssh" ? "ssh" : "local"); } catch { setMode("local"); }
+  showFolder();
+  $("pick").addEventListener("click", async () => {
+    const f = await invoke("pick_folder");
+    if (f) { folder = f; showFolder(); try { localStorage.setItem("folder", f); } catch {} }
+  });
   $("f").addEventListener("submit", async (ev) => {
     ev.preventDefault();
+    if (mode() === "local") {
+      if (!folder) return status("Choose a project folder first.", true);
+      $("go").disabled = true;
+      status("Starting reliontree ...");
+      try {
+        await invoke("open_local", { folder });
+        status("Open. Close the reliontree window to stop it.");
+      } catch (e) {
+        status(String(e), true);
+      } finally {
+        $("go").disabled = false;
+      }
+      return;
+    }
     const v = Object.fromEntries(fields.map((k) => [k, $(k).value.trim()]));
     try { localStorage.setItem("last", JSON.stringify(v)); } catch {}
     $("go").disabled = true;

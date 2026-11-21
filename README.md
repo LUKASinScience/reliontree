@@ -170,8 +170,13 @@ and port, and the project folder on the cluster. It runs
 needs an ssh key or agent; it never asks for a password or 2FA code), picks another port if P is busy, and opens the
 printed login address in its own window. Closing that window ends ssh and the server on the cluster. No Python on your
 computer; `reliontree` must be installed on the cluster. Windows needs the OpenSSH client (Settings > Optional features).
+**Local folder** mode opens a RELION project on your own computer (or a mounted share) without Python: the app ships
+reliontree frozen with PyInstaller as a sidecar and runs `reliontree watch --no-open --port P <folder>` itself; closing
+the window stops it. On Windows the ChimeraX buttons cannot start ChimeraX (that goes through `bash`); they say so, and
+a ChimeraX where you ran the listener yourself (`runscript` of `reliontree listener-path`) still receives the maps.
 Builds are unsigned (macOS Gatekeeper and Windows SmartScreen will warn); `.github/workflows/desktop.yml` builds them.
-Build locally: `cd desktop && npm install && npx tauri build` (tests: `cd desktop/src-tauri && cargo test`).
+Build locally: `pip install pyinstaller && bash scripts/build_sidecar.sh`, then `cd desktop && npm install && npx tauri build`
+(tests: `cd desktop/src-tauri && cargo test`, which also needs the sidecar built first).
 
 ## Testing
 

@@ -1,13 +1,17 @@
-// Thin desktop shell: runs `reliontree watch` on the cluster through the system ssh,
-// forwards the port and shows the printed login address in its own window.
+// Thin desktop shell: runs `reliontree watch` on the cluster through the system ssh (port forwarded),
+// or locally through the bundled sidecar (PyInstaller build of reliontree, no Python needed),
+// and shows the printed login address in its own window.
 use std::io::{BufRead, BufReader, Read};
+use std::path::Path;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 
+/// The running ssh tunnel or local sidecar; stopped when its window closes.
 struct Tunnel(Mutex<Option<Child>>);
 
 const TRIES: usize = 5;
@@ -74,6 +78,11 @@ pub fn ssh_args(host: &str, user: &str, ssh_port: Option<u16>, project: &str, po
     a
 }
 
+/// Arguments for the bundled sidecar (local mode). No `--` needed: the folder comes from the dialog (absolute path).
+pub fn local_args(folder: &str, port: u16) -> Vec<String> {
+    vec!["watch".into(), "--no-open".into(), "--port".into(), port.to_string(), folder.into()]
+}
+
 /// Short, actionable error from what ssh/the cluster printed.
 pub fn explain(output: &str) -> String {
     let o = output.to_lowercase();
@@ -119,12 +128,12 @@ fn check_ssh() -> Result<String, String> {
     }
 }
 
-/// Start ssh, wait for the login address. Ok((child, url)), Err((busy_port, message)).
-fn try_once(args: &[String], port: u16) -> Result<(Child, String), (bool, String)> {
-    let mut cmd = Command::new("ssh");
+/// Start `program`, wait for the login address. Ok((child, url)), Err((busy_port, message)).
+fn try_once(program: &Path, args: &[String], port: u16) -> Result<(Child, String), (bool, String)> {
+    let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| (false, format!("could not start ssh: {e}")))?;
+    let mut child = cmd.spawn().map_err(|e| (false, format!("could not start {}: {e}", program.display())))?;
     let (tx, rx) = mpsc::channel::<String>();
     // keep draining both pipes for the life of ssh so it never blocks on a full pipe
     fn pump(r: impl Read + Send + 'static, tx: mpsc::Sender<String>) {
@@ -151,12 +160,33 @@ fn try_once(args: &[String], port: u16) -> Result<(Child, String), (bool, String
                 let _ = child.kill();
                 let _ = child.wait();
                 if matches!(e, mpsc::RecvTimeoutError::Timeout) {
-                    return Err((false, format!("No login address from the cluster after {}s.\n\n{seen}", TIMEOUT.as_secs())));
+                    return Err((false, format!("No login address from reliontree after {}s.\n\n{seen}", TIMEOUT.as_secs())));
                 }
                 return Err((port_in_use(&seen), explain(&seen)));
             }
         }
     }
+}
+
+/// Start `program` with `args(port)` on free ports until one works (busy port: next one).
+async fn start_server(program: std::path::PathBuf, args: impl Fn(u16) -> Vec<String> + Send + 'static) -> Result<(Child, String), String> {
+    let seed = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut tried = Vec::new();
+        let mut last = String::new();
+        for _ in 0..TRIES {
+            let port = pick_port(seed, &tried, local_free).ok_or("no free local port")?;
+            tried.push(port);
+            match try_once(&program, &args(port), port) {
+                Ok(ok) => return Ok(ok),
+                Err((true, msg)) => last = msg, // busy on either end: next port
+                Err((false, msg)) => return Err(msg),
+            }
+        }
+        Err(format!("Every port tried was busy.\n\n{last}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -166,27 +196,32 @@ async fn connect(app: tauri::AppHandle, host: String, user: String, ssh_port: Op
         return Err("Host and user must be single words that do not start with '-'.".into());
     }
     check_ssh()?;
-    let seed = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
-    let (child, url) = tauri::async_runtime::spawn_blocking(move || {
-        let mut tried = Vec::new();
-        let mut last = String::new();
-        for _ in 0..TRIES {
-            let port = pick_port(seed, &tried, local_free).ok_or("no free local port")?;
-            tried.push(port);
-            match try_once(&ssh_args(&host, &user, ssh_port, &project, port), port) {
-                Ok(ok) => return Ok(ok),
-                Err((true, msg)) => last = msg, // busy on either end: next port
-                Err((false, msg)) => return Err(msg),
-            }
-        }
-        Err(format!("Every port tried was busy.\n\n{last}"))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let (child, url) = start_server("ssh".into(), move |port| ssh_args(&host, &user, ssh_port, &project, port)).await?;
+    open_view(&app, child, url)
+}
 
+#[tauri::command]
+async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+    let dir = app.dialog().file().set_title("RELION project folder").blocking_pick_folder()?;
+    Some(dir.into_path().ok()?.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn open_local(app: tauri::AppHandle, folder: String) -> Result<(), String> {
+    if !Path::new(&folder).is_dir() {
+        return Err(format!("Not a folder: {folder}"));
+    }
+    // externalBin: Tauri puts the sidecar next to the app's own binary, without the target-triple suffix
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let sidecar = exe.with_file_name(format!("reliontree-cli{}", std::env::consts::EXE_SUFFIX));
+    let (child, url) = start_server(sidecar, move |port| local_args(&folder, port)).await?;
+    open_view(&app, child, url)
+}
+
+fn open_view(app: &tauri::AppHandle, child: Child, url: String) -> Result<(), String> {
     *app.state::<Tunnel>().0.lock().unwrap() = Some(child);
     let handle = app.clone();
-    WebviewWindowBuilder::new(&app, "view", WebviewUrl::External(url.parse().map_err(|_| "bad address")?))
+    WebviewWindowBuilder::new(app, "view", WebviewUrl::External(url.parse().map_err(|_| "bad address")?))
         .title("reliontree")
         .inner_size(1400.0, 900.0)
         .build()
@@ -205,17 +240,33 @@ async fn connect(app: tauri::AppHandle, host: String, user: String, ssh_port: Op
     Ok(())
 }
 
+/// Ask politely, then force. The sidecar is a PyInstaller --onefile build: a bootloader whose child is the real
+/// Python process. A bare kill (SIGKILL / TerminateProcess) of the bootloader would leave that child running.
 fn stop_tunnel(app: &tauri::AppHandle) {
-    if let Some(mut c) = app.state::<Tunnel>().0.lock().unwrap().take() {
-        let _ = c.kill();
-        let _ = c.wait();
+    let Some(mut c) = app.state::<Tunnel>().0.lock().unwrap().take() else { return };
+    let pid = c.id().to_string();
+    // Unix: SIGTERM, which the bootloader forwards to Python (ssh exits on it too). Windows: end the whole tree.
+    let mut cmd = if cfg!(windows) { Command::new("taskkill") } else { Command::new("kill") };
+    if cfg!(windows) { cmd.args(["/T", "/F", "/PID", &pid]) } else { cmd.args(["-TERM", &pid]) };
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    no_window(&mut cmd);
+    let _ = cmd.status();
+    let end = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < end {
+        if let Ok(Some(_)) = c.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    let _ = c.kill();
+    let _ = c.wait();
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Tunnel(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![check_ssh, connect])
+        .invoke_handler(tauri::generate_handler![check_ssh, connect, pick_folder, open_local])
         .build(tauri::generate_context!())
         .expect("error while building reliontree")
         .run(|app, event| {
@@ -280,6 +331,11 @@ mod tests {
         let b = ssh_args("hpc", "", None, "", 30001);
         assert!(!b.contains(&"-p".to_string()) && !b.contains(&"-l".to_string()));
         assert_eq!(b.last().unwrap(), "exec reliontree watch --no-open --port 30001");
+    }
+
+    #[test]
+    fn local_command_line() {
+        assert_eq!(local_args("/data/my proj", 30002), ["watch", "--no-open", "--port", "30002", "/data/my proj"]);
     }
 
     #[test]

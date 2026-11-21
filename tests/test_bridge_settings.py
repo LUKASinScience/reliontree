@@ -49,6 +49,13 @@ def test_shell_line(home):
     assert line.splitlines() == ["module load chimerax", "exec chimerax --nogui --version"]
 
 
+def test_windows_refuses_to_launch_with_a_hint(home, monkeypatch):
+    monkeypatch.setattr(cb, "NO_LAUNCH", "needs bash")
+    with pytest.raises(ValueError, match="needs bash"):
+        cb._shell_line({"chimerax_cmd": "", "prelaunch": "", "figure_template": ""}, "x")
+    assert cb.check_settings() == (False, "needs bash")
+
+
 def test_no_chimerax_gives_a_clear_error(home, monkeypatch):
     monkeypatch.setattr(cb, "_auto_chimerax", lambda: None)
     with pytest.raises(ValueError, match="Settings"):

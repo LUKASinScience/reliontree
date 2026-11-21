@@ -15,3 +15,4 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # no "compression": it embeds the Brotli dictionary (a fixed English word list that includes personal names) in the binary
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "dynamic-acl", "x11", "dbus"] }
+tauri-plugin-dialog = "2"
