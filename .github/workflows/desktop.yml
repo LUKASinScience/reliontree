@@ -1,0 +1,84 @@
+name: Desktop app
+
+# Builds the experimental Tauri desktop shell in desktop/ (ssh to the cluster, no bundled Python)
+# for macOS Apple Silicon, macOS Intel, Windows and Linux. Unsigned. Run it by hand from the
+# Actions tab, or push a tag like v0.6.0. The installers show up as workflow artifacts; a tag
+# also creates a DRAFT release (review and publish it by hand).
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest        # Apple Silicon
+            name: macos-arm64
+          - os: macos-15-intel      # Intel Macs
+            name: macos-x64
+          - os: windows-latest
+            name: windows-x64
+          - os: ubuntu-latest
+            name: linux-x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # Rust is preinstalled on GitHub's runners.
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Unit tests
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      - name: Build desktop app
+        run: |
+          npm install
+          npx tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reliontree-desktop-${{ matrix.name }}
+          path: |
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  # On a v* tag: collect every installer into one DRAFT release (review and publish it by hand).
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t FILES < <(find dist -type f)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" --draft --generate-notes \
+              --title "reliontree ${GITHUB_REF_NAME#v}" --repo "$GITHUB_REPOSITORY"
+          fi

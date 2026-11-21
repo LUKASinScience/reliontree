@@ -1,0 +1,17 @@
+[package]
+name = "reliontree-desktop"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "reliontree_desktop_lib"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# no "compression": it embeds the Brotli dictionary (a fixed English word list that includes personal names) in the binary
+tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "dynamic-acl", "x11", "dbus"] }

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reliontree</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --muted: #666; --line: #ccc; --err: #b00020; --accent: #2a6fdb; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #1e1e1e; --muted: #aaa; --line: #444; --err: #ff6b6b; } }
+  body { font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 20px 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 16px; }
+  label { display: block; margin: 10px 0 3px; font-weight: 600; }
+  label small { font-weight: 400; color: var(--muted); }
+  input { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; }
+  .row { display: flex; gap: 10px; } .row > div { flex: 1; } .row > div.port { flex: 0 0 90px; }
+  button { margin-top: 16px; padding: 8px 18px; font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .note { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; }
+  #status { margin-top: 12px; white-space: pre-wrap; font-size: 13px; }
+  #status.err { color: var(--err); }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>reliontree</h1>
+<p class="sub">Opens the live view of a RELION project on the cluster through ssh.</p>
+<form id="f">
+  <div class="row">
+    <div><label for="host">Host</label><input id="host" required placeholder="login.cluster or a name from ~/.ssh/config" autocomplete="off" spellcheck="false"></div>
+    <div class="port"><label for="port">Port <small>opt.</small></label><input id="port" type="number" min="1" max="65535" placeholder="22"></div>
+  </div>
+  <label for="user">User <small>optional</small></label>
+  <input id="user" autocomplete="off" spellcheck="false">
+  <label for="project">Project folder on the cluster <small>(contains default_pipeline.star)</small></label>
+  <input id="project" placeholder="/path/to/relion/project" autocomplete="off" spellcheck="false">
+  <button id="go" type="submit">Connect</button>
+</form>
+<div class="note">
+  Uses your ssh key or ssh agent. This window never asks for a password or 2FA code.
+  If your cluster needs those, log in once in a terminal first, or set up a key
+  (and, if allowed, <code>ControlMaster</code> in <code>~/.ssh/config</code>).
+  Check it with: <code>ssh -o BatchMode=yes &lt;host&gt; reliontree --version</code>
+</div>
+<div id="status" role="status" aria-live="polite"></div>
+<script>
+  const invoke = window.__TAURI__.core.invoke;
+  const $ = (id) => document.getElementById(id);
+  const status = (msg, err) => { $("status").textContent = msg; $("status").className = err ? "err" : ""; };
+  const fields = ["host", "port", "user", "project"];
+  try { const s = JSON.parse(localStorage.getItem("last") || "{}"); fields.forEach((k) => { if (s[k]) $(k).value = s[k]; }); } catch {}
+  invoke("check_ssh").then((v) => status("ssh found: " + v)).catch((e) => status(String(e), true));
+  $("f").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const v = Object.fromEntries(fields.map((k) => [k, $(k).value.trim()]));
+    try { localStorage.setItem("last", JSON.stringify(v)); } catch {}
+    $("go").disabled = true;
+    status("Connecting to " + v.host + " ...");
+    try {
+      await invoke("connect", { host: v.host, user: v.user, sshPort: v.port ? Number(v.port) : null, project: v.project });
+      status("Connected. Close the reliontree window to stop the server on the cluster.");
+    } catch (e) {
+      status(String(e), true);
+    } finally {
+      $("go").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

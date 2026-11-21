@@ -162,6 +162,17 @@ validates job ids and never returns absolute paths. For Claude Code:
 `claude mcp add reliontree -- reliontree mcp /path/to/project`; for other clients use
 `{"command": "reliontree", "args": ["mcp", "/path/to/project"]}`.
 
+## Desktop app (experimental)
+
+`desktop/` holds a small [Tauri](https://v2.tauri.app) app that saves you the tunnel command: enter host, optional user
+and port, and the project folder on the cluster. It runs
+`ssh -L P:127.0.0.1:P host reliontree watch <project> --no-open --port P` with the system `ssh` (`BatchMode=yes`, so it
+needs an ssh key or agent; it never asks for a password or 2FA code), picks another port if P is busy, and opens the
+printed login address in its own window. Closing that window ends ssh and the server on the cluster. No Python on your
+computer; `reliontree` must be installed on the cluster. Windows needs the OpenSSH client (Settings > Optional features).
+Builds are unsigned (macOS Gatekeeper and Windows SmartScreen will warn); `.github/workflows/desktop.yml` builds them.
+Build locally: `cd desktop && npm install && npx tauri build` (tests: `cd desktop/src-tauri && cargo test`).
+
 ## Testing
 
 **1. Automated tests** (fast, no RELION project needed):
