@@ -24,6 +24,8 @@ nav = [
 
 [project.theme]
 language = "en"
+logo = "assets/logo.svg"
+favicon = "assets/logo.svg"
 features = [
   "announce.dismiss",
   "content.code.annotate",

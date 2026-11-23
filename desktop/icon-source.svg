@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <rect width="1024" height="1024" rx="200" fill="#0d0d0d"/>
   
-    <path transform="translate(70 0)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M640 170 L572 330 M640 170 L708 330"/>
-    <path transform="translate(70 0)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M560 380 L470 590 M720 380 L810 590"/>
-    <path transform="translate(70 0)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M510 600 L770 600"/>
-    <path transform="translate(70 0)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M610 650 V800 M670 650 V800"/>
+    <path transform="translate(296 120) scale(.8)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M640 170 L572 330 M640 170 L708 330"/>
+    <path transform="translate(296 120) scale(.8)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M560 380 L470 590 M720 380 L810 590"/>
+    <path transform="translate(296 120) scale(.8)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M510 600 L770 600"/>
+    <path transform="translate(296 120) scale(.8)" stroke="#7fd18b" stroke-width="40" stroke-linecap="round" fill="none" d="M610 650 V800 M670 650 V800"/>
   
   
-    <path transform="translate(25 120) scale(.85)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M70 770 Q100 720 130 770 T190 770"/>
-    <path transform="translate(25 120) scale(.85)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M280 690 Q215 770 280 850"/>
-    <path transform="translate(25 120) scale(.85)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M320 870 H420"/>
-    <path transform="translate(25 120) scale(.85)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M470 690 V720"/>
-    <path transform="translate(25 120) scale(.85)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M520 700 L590 780 L520 860"/>
+    <path transform="translate(-5 -135) scale(1.05)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M70 770 Q100 720 130 770 T190 770"/>
+    <path transform="translate(-5 -135) scale(1.05)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M280 690 Q215 770 280 850"/>
+    <path transform="translate(-5 -135) scale(1.05)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M320 870 H420"/>
+    <path transform="translate(-5 -135) scale(1.05)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M470 690 V720"/>
+    <path transform="translate(-5 -135) scale(1.05)" stroke="#e8eaed" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M520 700 L590 780 L520 860"/>
   
 </svg>
