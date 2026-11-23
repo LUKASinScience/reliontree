@@ -86,7 +86,14 @@ an HPC login node (no X11, no root) or a cloud VM.
 ## Install
 
 reliontree needs **Python 3.9 or newer** and nothing else. It is not on PyPI yet, so it installs from GitHub. Click the way
-that fits your machine:
+that fits your machine.
+
+**Desktop app (no terminal, no Python):** download the installer for your system from the
+[latest release](https://github.com/LUKASinScience/reliontree/releases/latest): a `.dmg` for macOS (Apple Silicon or Intel),
+an `.exe` or `.msi` for Windows, an `.AppImage` or `.deb` for Linux. The app opens a local RELION project or one on a
+cluster over ssh. The installers are not code-signed yet, so macOS and Windows show a warning on the first start.
+
+Or install the command line tool:
 
 ??? install "Environment: venv or conda (recommended for daily use)"
 
